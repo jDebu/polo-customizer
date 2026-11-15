@@ -8,15 +8,12 @@ export async function createOrder(order: Order): Promise<void> {
     return
   }
   const payload = flattenOrder(order)
-  const res = await fetch(`${SHEETS_URL}?action=createOrder`, {
+  await fetch(`${SHEETS_URL}?action=createOrder`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain' },
     body: JSON.stringify(payload),
   })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`Sheets write failed (${res.status}): ${text}`)
-  }
 }
 
 export async function updateOrderStatus(
@@ -28,7 +25,8 @@ export async function updateOrderStatus(
   if (!SHEETS_URL) return
   await fetch(`${SHEETS_URL}?action=updateStatus`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain' },
     body: JSON.stringify({ orderId, status, notes, estimatedDelivery }),
   })
 }

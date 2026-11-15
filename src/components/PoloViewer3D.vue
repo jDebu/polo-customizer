@@ -66,6 +66,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { useStore } from '../store/index'
 import type { ImageState, InteractionMode } from '../store/types'
+import { buildShirt, disposeObject } from '../three/buildShirt'
 
 const store = useStore()
 const { design } = store
@@ -80,12 +81,13 @@ let renderer: THREE.WebGLRenderer | null = null
 let scene: THREE.Scene | null = null
 let camera: THREE.PerspectiveCamera | null = null
 let controls: OrbitControls | null = null
-let poloMesh: THREE.Mesh | null = null
+let shirt: THREE.Group | null = null
+let frontPlane: THREE.Mesh | null = null
+let backPlane: THREE.Mesh | null = null
 let texCanvas: HTMLCanvasElement | null = null
 let texCanvasBack: HTMLCanvasElement | null = null
 let texture: THREE.CanvasTexture | null = null
 let textureBack: THREE.CanvasTexture | null = null
-let sidesMat: THREE.MeshStandardMaterial | null = null
 let raf: number | null = null
 let resizeObserver: ResizeObserver | null = null
 
@@ -141,97 +143,6 @@ const dragStyle = computed(() => {
   }
 })
 
-// ── Polo silhouette geometry builder ────────────────────────
-function buildPoloGeo(sleeveType: 'short' | 'long'): THREE.BufferGeometry {
-  const shape = new THREE.Shape()
-  const ny = (v: number) => 1.0 - v
-
-  if (sleeveType === 'short') {
-    shape.moveTo(0.4, ny(0.083))
-    shape.bezierCurveTo(0.4, ny(0.058), 0.45, ny(0.046), 0.5, ny(0.046))
-    shape.bezierCurveTo(0.55, ny(0.046), 0.6, ny(0.058), 0.6, ny(0.083))
-    shape.lineTo(0.636, ny(0.096))
-    shape.bezierCurveTo(0.675, ny(0.098), 0.715, ny(0.1), 0.742, ny(0.104))
-    shape.bezierCurveTo(0.802, ny(0.108), 0.876, ny(0.116), 0.914, ny(0.123))
-    shape.bezierCurveTo(0.952, ny(0.133), 0.966, ny(0.158), 0.961, ny(0.191))
-    shape.bezierCurveTo(0.958, ny(0.215), 0.948, ny(0.228), 0.93, ny(0.238))
-    shape.bezierCurveTo(0.916, ny(0.245), 0.9, ny(0.248), 0.885, ny(0.246))
-    shape.bezierCurveTo(0.864, ny(0.243), 0.843, ny(0.231), 0.828, ny(0.218))
-    shape.bezierCurveTo(0.818, ny(0.21), 0.808, ny(0.202), 0.796, ny(0.197))
-    shape.lineTo(0.783, ny(0.193))
-    shape.lineTo(0.773, ny(0.947))
-    shape.bezierCurveTo(0.773, ny(0.963), 0.760, ny(0.970), 0.746, ny(0.970))
-    shape.lineTo(0.254, ny(0.970))
-    shape.bezierCurveTo(0.240, ny(0.970), 0.227, ny(0.963), 0.227, ny(0.947))
-    shape.lineTo(0.217, ny(0.193))
-    shape.lineTo(0.204, ny(0.197))
-    shape.bezierCurveTo(0.192, ny(0.202), 0.182, ny(0.21), 0.172, ny(0.218))
-    shape.bezierCurveTo(0.157, ny(0.231), 0.136, ny(0.243), 0.115, ny(0.246))
-    shape.bezierCurveTo(0.100, ny(0.248), 0.084, ny(0.245), 0.070, ny(0.238))
-    shape.bezierCurveTo(0.052, ny(0.228), 0.042, ny(0.215), 0.039, ny(0.191))
-    shape.bezierCurveTo(0.034, ny(0.158), 0.048, ny(0.133), 0.086, ny(0.123))
-    shape.bezierCurveTo(0.124, ny(0.116), 0.198, ny(0.108), 0.258, ny(0.104))
-    shape.bezierCurveTo(0.285, ny(0.1), 0.325, ny(0.098), 0.364, ny(0.096))
-    shape.lineTo(0.4, ny(0.083))
-  } else {
-    shape.moveTo(0.4, ny(0.083))
-    shape.bezierCurveTo(0.4, ny(0.058), 0.45, ny(0.046), 0.5, ny(0.046))
-    shape.bezierCurveTo(0.55, ny(0.046), 0.6, ny(0.058), 0.6, ny(0.083))
-    shape.lineTo(0.636, ny(0.096))
-    shape.bezierCurveTo(0.675, ny(0.098), 0.715, ny(0.1), 0.742, ny(0.104))
-    shape.bezierCurveTo(0.802, ny(0.108), 0.886, ny(0.116), 0.924, ny(0.123))
-    shape.bezierCurveTo(0.958, ny(0.132), 0.972, ny(0.155), 0.968, ny(0.185))
-    shape.bezierCurveTo(0.966, ny(0.4), 0.962, ny(0.6), 0.954, ny(0.78))
-    shape.bezierCurveTo(0.948, ny(0.84), 0.94, ny(0.86), 0.924, ny(0.868))
-    shape.lineTo(0.864, ny(0.868))
-    shape.bezierCurveTo(0.848, ny(0.868), 0.84, ny(0.858), 0.84, ny(0.846))
-    shape.bezierCurveTo(0.84, ny(0.835), 0.848, ny(0.826), 0.862, ny(0.825))
-    shape.bezierCurveTo(0.874, ny(0.822), 0.882, ny(0.812), 0.884, ny(0.78))
-    shape.bezierCurveTo(0.892, ny(0.6), 0.896, ny(0.4), 0.892, ny(0.185))
-    shape.bezierCurveTo(0.89, ny(0.168), 0.882, ny(0.16), 0.866, ny(0.16))
-    shape.lineTo(0.783, ny(0.193))
-    shape.lineTo(0.773, ny(0.947))
-    shape.bezierCurveTo(0.773, ny(0.963), 0.760, ny(0.970), 0.746, ny(0.970))
-    shape.lineTo(0.254, ny(0.970))
-    shape.bezierCurveTo(0.240, ny(0.970), 0.227, ny(0.963), 0.227, ny(0.947))
-    shape.lineTo(0.217, ny(0.193))
-    shape.lineTo(0.134, ny(0.16))
-    shape.bezierCurveTo(0.118, ny(0.16), 0.110, ny(0.168), 0.108, ny(0.185))
-    shape.bezierCurveTo(0.104, ny(0.4), 0.108, ny(0.6), 0.116, ny(0.78))
-    shape.bezierCurveTo(0.118, ny(0.812), 0.126, ny(0.822), 0.138, ny(0.825))
-    shape.bezierCurveTo(0.152, ny(0.826), 0.160, ny(0.835), 0.160, ny(0.846))
-    shape.bezierCurveTo(0.160, ny(0.858), 0.152, ny(0.868), 0.136, ny(0.868))
-    shape.lineTo(0.076, ny(0.868))
-    shape.bezierCurveTo(0.060, ny(0.868), 0.052, ny(0.858), 0.046, ny(0.846))
-    shape.bezierCurveTo(0.038, ny(0.84), 0.032, ny(0.825), 0.046, ny(0.78))
-    shape.bezierCurveTo(0.038, ny(0.6), 0.034, ny(0.4), 0.032, ny(0.185))
-    shape.bezierCurveTo(0.028, ny(0.155), 0.042, ny(0.132), 0.076, ny(0.123))
-    shape.bezierCurveTo(0.114, ny(0.116), 0.198, ny(0.108), 0.258, ny(0.104))
-    shape.bezierCurveTo(0.285, ny(0.1), 0.325, ny(0.098), 0.364, ny(0.096))
-    shape.lineTo(0.4, ny(0.083))
-  }
-
-  // Shape coords are in [0,1]×[0,1]; depth in same units before Z-scale
-  const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.14, bevelEnabled: false })
-  // Scale to Three.js world units and center at origin
-  geo.scale(2.0, 2.4, 1.0)
-  geo.translate(-1.0, -1.2, -0.07)
-
-  // Three.js adds bottom cap (z=0 → -0.07 after translate = back) first in group 0,
-  // top cap (z=depth → +0.07 = front) second. Split them for separate textures.
-  const capGroup = geo.groups.find(g => g.materialIndex === 0)
-  const wallGroup = geo.groups.find(g => g.materialIndex === 1)
-  if (capGroup) {
-    const half = capGroup.count / 2
-    geo.clearGroups()
-    geo.addGroup(capGroup.start, half, 0)             // bottom cap → mat[0] = backMat
-    geo.addGroup(capGroup.start + half, half, 1)      // top cap    → mat[1] = frontMat
-    if (wallGroup) geo.addGroup(wallGroup.start, wallGroup.count, 2) // walls → mat[2] = sidesMat
-  }
-
-  return geo
-}
-
 // ── Three.js init ─────────────────────────────────────────────
 function initThree() {
   if (!threeCanvas.value || !container.value) return
@@ -245,44 +156,60 @@ function initThree() {
   renderer.outputColorSpace = THREE.SRGBColorSpace
 
   scene = new THREE.Scene()
-  scene.background = new THREE.Color(0xf0f0f0)
+  scene.background = new THREE.Color(0xeef0f3)
 
-  camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 100)
-  camera.position.set(0, 0, 3.2)
+  camera = new THREE.PerspectiveCamera(30, W / H, 0.05, 20)
+  camera.position.set(0, 0.36, 1.9)
 
-  // Lighting — fabric-friendly three-point
-  const ambient = new THREE.AmbientLight(0xffffff, 0.55)
-  scene.add(ambient)
-  const key = new THREE.DirectionalLight(0xfff5e0, 0.9)
-  key.position.set(2, 3, 4)
-  scene.add(key)
-  const fill = new THREE.DirectionalLight(0xddeeff, 0.3)
-  fill.position.set(-3, 0, 2)
-  scene.add(fill)
+  // Lighting — physical units (r155+)
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x6f747e, 0.5 * Math.PI))
+  const keyL = new THREE.DirectionalLight(0xffffff, 0.9 * Math.PI)
+  keyL.position.set(1.5, 2, 2.5); scene.add(keyL)
+  const fillL = new THREE.DirectionalLight(0xffffff, 0.3 * Math.PI)
+  fillL.position.set(-2, 1, 1.5); scene.add(fillL)
+  const backL = new THREE.DirectionalLight(0xffffff, 0.4 * Math.PI)
+  backL.position.set(0, 1.5, -2.5); scene.add(backL)
 
-  // Front texture canvas
+  // Soft shadow blob under shirt
+  const shC = document.createElement('canvas'); shC.width = shC.height = 128
+  const shG = shC.getContext('2d')!
+  const gr = shG.createRadialGradient(64, 64, 0, 64, 64, 64)
+  gr.addColorStop(0, 'rgba(0,0,0,.35)'); gr.addColorStop(1, 'rgba(0,0,0,0)')
+  shG.fillStyle = gr; shG.fillRect(0, 0, 128, 128)
+  const shTex = new THREE.CanvasTexture(shC)
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.9, 0.6),
+    new THREE.MeshBasicMaterial({ map: shTex, transparent: true, depthWrite: false })
+  )
+  floor.rotation.x = -Math.PI / 2; floor.position.y = -0.04; scene.add(floor)
+
+  // Parametric 3D shirt body
+  shirt = buildShirt({ dropF: 11.5, dropB: 3, neckW: 10, bandW: 3, color: design.poloColor, wire: false, detail: false })
+  scene.add(shirt)
+
+  // Design canvas textures (front + back)
   texCanvas = document.createElement('canvas')
   texCanvas.width = CANVAS_W
   texCanvas.height = CANVAS_H
   texture = new THREE.CanvasTexture(texCanvas)
   texture.colorSpace = THREE.SRGBColorSpace
 
-  // Back texture canvas
   texCanvasBack = document.createElement('canvas')
   texCanvasBack.width = CANVAS_W
   texCanvasBack.height = CANVAS_H
   textureBack = new THREE.CanvasTexture(texCanvasBack)
   textureBack.colorSpace = THREE.SRGBColorSpace
 
-  // ExtrudeGeometry from polo silhouette — correct shirt profile from all angles
-  const geo = buildPoloGeo(design.sleeveType)
-
+  // Front/back planes — canvas silhouette laid over the parametric body
   const frontMat = new THREE.MeshStandardMaterial({
     map: texture,
     roughness: 0.88,
     metalness: 0.0,
     transparent: true,
     alphaTest: 0.08,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
   })
   const backMat = new THREE.MeshStandardMaterial({
     map: textureBack,
@@ -290,29 +217,34 @@ function initThree() {
     metalness: 0.0,
     transparent: true,
     alphaTest: 0.08,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
   })
-  sidesMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(design.poloColor),
-    roughness: 0.9,
-    metalness: 0.0,
-  })
-  // mat[0]=backMat (bottom cap z=-0.07), mat[1]=frontMat (top cap z=+0.07), mat[2]=sidesMat
-  poloMesh = new THREE.Mesh(geo, [backMat, frontMat, sidesMat])
-  scene.add(poloMesh)
+  const planeGeo = new THREE.PlaneGeometry(0.72, 0.74)
+  frontPlane = new THREE.Mesh(planeGeo, frontMat)
+  frontPlane.position.set(0, 0.35, 0.136)
+  scene.add(frontPlane)
+  backPlane = new THREE.Mesh(planeGeo, backMat)
+  backPlane.position.set(0, 0.35, -0.136)
+  backPlane.rotation.y = Math.PI
+  scene.add(backPlane)
 
   // OrbitControls
   controls = new OrbitControls(camera, renderer.domElement)
+  controls.target.set(0, 0.36, 0)
   controls.enablePan = false
   controls.enableZoom = true
-  controls.minDistance = 1.8
-  controls.maxDistance = 6
-  controls.minPolarAngle = Math.PI * 0.28
-  controls.maxPolarAngle = Math.PI * 0.72
+  controls.minDistance = 0.6
+  controls.maxDistance = 4.0
+  controls.minPolarAngle = Math.PI * 0.1
+  controls.maxPolarAngle = Math.PI * 0.9
   controls.minAzimuthAngle = -Infinity
   controls.maxAzimuthAngle = Infinity
   controls.dampingFactor = 0.08
   controls.enableDamping = true
   controls.enabled = mode.value === 'rotate'
+  controls.update()
 
   // Track front vs back for overlay visibility
   controls.addEventListener('change', () => {
@@ -354,21 +286,10 @@ function drawPolo() {
 function drawFront() {
   if (!texCanvas) return
   const ctx = texCanvas.getContext('2d')!
-  const W = CANVAS_W, H = CANVAS_H
-
-  ctx.clearRect(0, 0, W, H)
-
-  drawPoloPath(ctx, W, H)
-  ctx.fillStyle = design.poloColor
-  ctx.fill()
-
-  drawFabricTexture(ctx, W, H)
-  drawBodyShadows(ctx, W, H)
-  drawCollar(ctx, W, H)
-  drawSeams(ctx, W, H)
+  ctx.clearRect(0, 0, CANVAS_W, CANVAS_H)
 
   if (mode.value !== 'transform' && design.userImageSrc) {
-    drawDesignImage(ctx, W, H)
+    drawDesignImage(ctx, CANVAS_W, CANVAS_H)
   }
 
   if (texture) texture.needsUpdate = true
@@ -377,38 +298,7 @@ function drawFront() {
 function drawBack() {
   if (!texCanvasBack) return
   const ctx = texCanvasBack.getContext('2d')!
-  const W = CANVAS_W, H = CANVAS_H
-
-  ctx.clearRect(0, 0, W, H)
-
-  // Mirror canvas so back face reads correctly from behind
-  ctx.save()
-  ctx.translate(W, 0)
-  ctx.scale(-1, 1)
-
-  drawPoloPath(ctx, W, H)
-  ctx.fillStyle = design.poloColor
-  ctx.fill()
-
-  drawFabricTexture(ctx, W, H)
-  drawBodyShadows(ctx, W, H)
-
-  // Back collar — same band but no button placket
-  const darkerColor = adjustColor(design.poloColor, -0.18)
-  ctx.beginPath()
-  ctx.moveTo(W * 0.4, H * 0.083)
-  ctx.bezierCurveTo(W * 0.4, H * 0.058, W * 0.45, H * 0.046, W * 0.5, H * 0.046)
-  ctx.bezierCurveTo(W * 0.55, H * 0.046, W * 0.6, H * 0.058, W * 0.6, H * 0.083)
-  ctx.bezierCurveTo(W * 0.6, H * 0.1, W * 0.555, H * 0.11, W * 0.5, H * 0.11)
-  ctx.bezierCurveTo(W * 0.445, H * 0.11, W * 0.4, H * 0.1, W * 0.4, H * 0.083)
-  ctx.closePath()
-  ctx.fillStyle = darkerColor
-  ctx.fill()
-
-  drawSeams(ctx, W, H)
-
-  ctx.restore()
-
+  ctx.clearRect(0, 0, CANVAS_W, CANVAS_H)
   if (textureBack) textureBack.needsUpdate = true
 }
 
@@ -756,30 +646,32 @@ function onOverlayPointerUp() {
 
 // ── Camera controls ───────────────────────────────────────────
 function zoomIn() {
-  if (!camera) return
-  camera.position.multiplyScalar(0.85)
+  if (!camera || !controls) return
+  const dir = camera.position.clone().sub(controls.target).multiplyScalar(0.85)
+  camera.position.copy(controls.target.clone().add(dir))
+  controls.update()
 }
 function zoomOut() {
-  if (!camera) return
-  camera.position.multiplyScalar(1.18)
+  if (!camera || !controls) return
+  const dir = camera.position.clone().sub(controls.target).multiplyScalar(1.18)
+  camera.position.copy(controls.target.clone().add(dir))
+  controls.update()
 }
 function resetView() {
   if (!camera || !controls) return
-  camera.position.set(0, 0, 3.2)
-  controls.target.set(0, 0, 0)
+  camera.position.set(0, 0.36, 1.9)
+  controls.target.set(0, 0.36, 0)
   controls.update()
 }
 
 // ── Watchers ──────────────────────────────────────────────────
-watch(() => store.design.poloColor, (newColor) => {
-  if (sidesMat) sidesMat.color.set(new THREE.Color(newColor))
+watch(() => store.design.poloColor, () => {
+  if (shirt && scene) { scene.remove(shirt); disposeObject(shirt) }
+  shirt = buildShirt({ dropF: 11.5, dropB: 3, neckW: 10, bandW: 3, color: store.design.poloColor, wire: false, detail: false })
+  if (scene) scene.add(shirt)
   drawPolo()
 })
 watch(() => store.design.sleeveType, () => {
-  if (poloMesh) {
-    poloMesh.geometry.dispose()
-    poloMesh.geometry = buildPoloGeo(store.design.sleeveType)
-  }
   drawPolo()
 })
 watch(
@@ -800,6 +692,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (raf) cancelAnimationFrame(raf)
+  if (shirt) disposeObject(shirt)
   renderer?.dispose()
   resizeObserver?.disconnect()
 })
