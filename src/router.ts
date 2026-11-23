@@ -29,7 +29,7 @@ router.beforeEach((to) => {
   const store = useStore()
   store.restoreAdminSession()
   if (to.meta.requiresAdmin && !store.isAdmin) return '/admin/login'
-  if (to.meta.requiresDesign && !store.design.userImageSrc && !store.design.popularDesignId) return '/design'
+  if (to.meta.requiresDesign && store.design.placedImages.length === 0 && !store.design.popularDesignId) return '/design'
   if (to.meta.requiresOrder && !store.delivery.recipientName) return '/order'
 })
 

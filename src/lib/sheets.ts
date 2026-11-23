@@ -44,6 +44,10 @@ export async function getOrders(params: {
 }
 
 function flattenOrder(order: Order) {
+  const renders = order.renderUrls ?? []
+  const designUrls = order.designImageUrls?.length
+    ? order.designImageUrls.join(' | ')
+    : (order.design.popularDesignId ?? '')
   return {
     orderId: order.orderId,
     createdAt: order.createdAt,
@@ -55,7 +59,11 @@ function flattenOrder(order: Order) {
     size: order.item.size,
     quantity: order.item.quantity,
     pricePerUnit: order.item.pricePerUnit,
-    designUrl: order.design.userImageSrc?.slice(0, 200) ?? order.design.popularDesignId ?? '',
+    designUrls,
+    renderFront: renders[0] ?? '',
+    renderBack: renders[1] ?? '',
+    renderRight: renders[2] ?? '',
+    renderLeft: renders[3] ?? '',
     deliveryDept: order.delivery.department,
     deliveryProv: order.delivery.province,
     deliveryDist: order.delivery.district,

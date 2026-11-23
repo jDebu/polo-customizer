@@ -2,6 +2,10 @@ import * as THREE from 'three'
 import {
   ShirtParams, V, armholeCut, armSeam, band, bodyPoint, buildBody, makeRing, stitch, toMetric, Profile
 } from './shirtGeometry'
+import { MOLDS, MOLD_BY_ID } from '../data/molds'
+import {
+  bodyPrintGeometry, printMaterial, sleevePrintGeometry, type PrintTextures, type SleeveGeo
+} from './printLayers'
 
 /** Textura de rib para el ribete (solo en modo marcaje). */
 function ribTexture() {
@@ -18,7 +22,7 @@ function ribTexture() {
 }
 let texRib: THREE.CanvasTexture | null = null
 
-export function buildShirt(Q: ShirtParams) {
+export function buildShirt(Q: ShirtParams, print: PrintTextures = {}) {
   const P = toMetric(Q)
   const D = Q.detail, hk = D ? 1 : 0.3
   const pf = (pr: Profile): Profile => pr.map(([s, h]) => [s, h * hk])
@@ -70,8 +74,8 @@ export function buildShirt(Q: ShirtParams) {
   }
 
   // Mangas con puño
-  const ang = (25 * Math.PI) / 180
-  const a = V(Math.cos(ang), -Math.sin(ang), 0), st = V(0.15, 0.6, 0), L = 0.2, rS = 0.077, rE = 0.067
+  const ang = (30 * Math.PI) / 180
+  const a = V(Math.cos(ang), -Math.sin(ang), 0), st = V(0.15, 0.6, 0), L = 0.3, rS = 0.078, rE = 0.066
   const cyl = new THREE.CylinderGeometry(rE, rS, L, 56, 12, true); cyl.translate(0, L / 2, 0)
   const sl = new THREE.Mesh(cyl, mSleeve)
   sl.add(new THREE.Mesh(cyl, mSleeveIn))
@@ -93,6 +97,19 @@ export function buildShirt(Q: ShirtParams) {
     sR.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 120, 0.0024, 8, sam.closed), mSeam))
   }
   const sL = sR.clone(); sL.scale.x = -1
+
+  // Capas de estampado: una por molde, ajustadas a la superficie real
+  const sGeo: SleeveGeo = { st, a, e1, e2, L, rS, rE }
+  for (const m of MOLDS) {
+    const tex = print[m.id]
+    if (!tex) continue
+    const mat = printMaterial(tex)
+    if (m.group === 'body') {
+      root.add(new THREE.Mesh(bodyPrintGeometry(P, MOLD_BY_ID[m.id]), mat))
+    } else {
+      ;(m.side === 'left' ? sL : sR).add(new THREE.Mesh(sleevePrintGeometry(sGeo, m, m.side === 'left'), mat))
+    }
+  }
   root.add(sR, sL)
   return root
 }

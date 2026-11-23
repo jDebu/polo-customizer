@@ -2,30 +2,64 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type {
   DesignConfig, OrderItem, DeliveryInfo, PaymentInfo,
-  Order, PopularDesign, InteractionMode, ImageState,
+  Order, PopularDesign, InteractionMode, ImageState, PanelId,
 } from './types'
-import { uploadVoucher } from '../lib/imgbb'
+import { uploadVoucher, uploadBase64Image } from '../lib/imgbb'
 import { createOrder } from '../lib/sheets'
 import { notifyNewOrder } from '../lib/telegram'
 import { POPULAR_DESIGNS, DELIVERY_RATES } from '../data/catalog'
+import {
+  MOLD_BY_ID, LAYOUTS, SAFE_MARGIN, containBox, fitInside, layoutCells, sizeFactor,
+  type SizeId,
+} from '../data/molds'
 
-const DEFAULT_IMAGE_STATE = (): ImageState => ({
-  x: 312, y: 300, width: 400, height: 400, rotation: 0, flipH: false,
-})
+function limaDateTime(): string {
+  return new Date().toLocaleString('en-US', {
+    timeZone: 'America/Lima',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: true,
+  })
+}
+
+/** Mide la imagen original (px). Si no carga, asume 1024×1024 para no bloquear el flujo. */
+function measure(src: string): Promise<{ w: number; h: number }> {
+  return new Promise(resolve => {
+    const el = new Image()
+    el.onload = () => resolve({ w: el.naturalWidth || 1024, h: el.naturalHeight || 1024 })
+    el.onerror = () => resolve({ w: 1024, h: 1024 })
+    el.src = src
+  })
+}
+
+/** Estado inicial: imagen entra completa en el formato recomendado del molde. */
+function initialState(panel: PanelId, aspect: number, index: number): ImageState {
+  const mold = MOLD_BY_ID[panel], f = mold.recommended
+  const [w, h] = containBox(aspect, f.w, f.h)
+  const off = index * 1.5
+  return fitInside(
+    { x: f.cx - w / 2 + off, y: f.cy - h / 2 + off, width: w, height: h, rotation: 0, flipH: false },
+    mold.limit,
+  )
+}
+
+function makeId() {
+  return `img-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`
+}
 
 export const useStore = defineStore('polo', () => {
   // ── Design state ───────────────────────────────────
   const design = ref<DesignConfig>({
     poloColor: '#ffffff',
     sleeveType: 'short',
-    userImageSrc: null,
-    userImageFile: null,
-    frontImageState: DEFAULT_IMAGE_STATE(),
-    backImageState: null,
     popularDesignId: null,
+    placedImages: [],
+    activePanel: 'front',
+    activeImageId: null,
   })
 
   const interactionMode = ref<InteractionMode>('transform')
+  const renderCaptures = ref<string[]>([])
 
   // ── Order state ────────────────────────────────────
   const orderItem = ref<OrderItem>({
@@ -53,59 +87,115 @@ export const useStore = defineStore('polo', () => {
   const adminOrders = ref<Order[]>([])
 
   // ── Computed ───────────────────────────────────────
-  const subtotal = computed(() =>
-    orderItem.value.pricePerUnit * orderItem.value.quantity
-  )
+  const subtotal = computed(() => orderItem.value.pricePerUnit * orderItem.value.quantity)
   const total = computed(() => subtotal.value + delivery.value.rate)
-
   const popularDesigns = computed<PopularDesign[]>(() => POPULAR_DESIGNS)
-
   const deliveryRates = computed(() => DELIVERY_RATES)
 
+  // Talla y factor de escala (talla M = 1.0)
+  const sizeId = computed(() => orderItem.value.size as SizeId)
+  const factor = computed(() => sizeFactor(sizeId.value))
+
   // ── Design actions ─────────────────────────────────
-  function setPoloColor(color: string) {
-    design.value.poloColor = color
+  function setPoloColor(color: string) { design.value.poloColor = color }
+  function setSleeveType(type: 'short' | 'long') { design.value.sleeveType = type }
+  function setInteractionMode(mode: InteractionMode) { interactionMode.value = mode }
+  function setSize(size: SizeId) { orderItem.value.size = size }
+
+  async function addImageToPanel(src: string, file: File | null, panel?: PanelId): Promise<string> {
+    if (design.value.placedImages.length >= 6) return ''
+    const target = panel ?? design.value.activePanel
+    const { w, h } = await measure(src)
+    if (design.value.placedImages.length >= 6) return ''
+    const id = makeId()
+    const index = design.value.placedImages.filter(i => i.panel === target).length
+    design.value.placedImages.push({
+      id, src, file, panel: target, natW: w, natH: h,
+      state: initialState(target, h / w, index),
+    })
+    design.value.activeImageId = id
+    return id
   }
 
-  function setSleeveType(type: 'short' | 'long') {
-    design.value.sleeveType = type
-    if (type === 'short') design.value.backImageState = null
-    else if (!design.value.backImageState)
-      design.value.backImageState = DEFAULT_IMAGE_STATE()
+  function removeImage(id: string) {
+    design.value.placedImages = design.value.placedImages.filter(i => i.id !== id)
+    if (design.value.activeImageId === id) design.value.activeImageId = null
   }
 
-  function setUserImage(src: string, file: File) {
-    design.value.userImageSrc = src
-    design.value.userImageFile = file
-    design.value.popularDesignId = null
-    design.value.frontImageState = DEFAULT_IMAGE_STATE()
+  function setActivePanel(panel: PanelId) { design.value.activePanel = panel }
+  function setActiveImage(id: string | null) { design.value.activeImageId = id }
+
+  /** Aplica el cambio y mantiene la imagen dentro del límite del molde (cm). */
+  function updatePlacedImageState(id: string, state: Partial<ImageState>) {
+    const img = design.value.placedImages.find(i => i.id === id)
+    if (!img) return
+    img.state = fitInside({ ...img.state, ...state }, MOLD_BY_ID[img.panel].limit)
   }
 
-  function setPopularDesign(id: string, src: string) {
-    design.value.userImageSrc = src
-    design.value.userImageFile = null
-    design.value.popularDesignId = id
-    design.value.frontImageState = DEFAULT_IMAGE_STATE()
+  /** Cambia el ancho (cm ref) conservando proporción y centro. */
+  function setImageWidth(id: string, widthRef: number) {
+    const img = design.value.placedImages.find(i => i.id === id)
+    if (!img) return
+    const s = img.state, aspect = img.natH / img.natW
+    const cx = s.x + s.width / 2, cy = s.y + s.height / 2
+    const w = Math.max(1, widthRef), h = w * aspect
+    updatePlacedImageState(id, { width: w, height: h, x: cx - w / 2, y: cy - h / 2 })
   }
 
-  function updateFrontImageState(state: Partial<ImageState>) {
-    design.value.frontImageState = { ...design.value.frontImageState, ...state }
+  function centerImage(id: string) {
+    const img = design.value.placedImages.find(i => i.id === id)
+    if (!img) return
+    const lim = MOLD_BY_ID[img.panel].limit
+    updatePlacedImageState(id, { x: (lim.w - img.state.width) / 2, y: (lim.h - img.state.height) / 2 })
   }
 
-  function updateBackImageState(state: Partial<ImageState>) {
-    if (design.value.backImageState)
-      design.value.backImageState = { ...design.value.backImageState, ...state }
+  /** Ajusta la imagen a un formato del molde (ej. 20×30) sin deformarla. */
+  function fitFormat(id: string, formatId: string) {
+    const img = design.value.placedImages.find(i => i.id === id)
+    if (!img) return
+    const f = MOLD_BY_ID[img.panel].formats.find(x => x.id === formatId)
+    if (!f) return
+    const [w, h] = containBox(img.natH / img.natW, f.w, f.h)
+    updatePlacedImageState(id, { width: w, height: h, x: f.cx - w / 2, y: f.cy - h / 2, rotation: 0 })
   }
 
-  function resetImagePosition() {
-    design.value.frontImageState = DEFAULT_IMAGE_STATE()
-    if (design.value.backImageState)
-      design.value.backImageState = DEFAULT_IMAGE_STATE()
+  /** "Ajustar a moldes": reparte las imágenes del molde activo en celdas iguales. */
+  function applyLayout(panel: PanelId, presetId: string) {
+    const imgs = design.value.placedImages.filter(i => i.panel === panel)
+    const preset = LAYOUTS[imgs.length]?.find(p => p.id === presetId)
+    if (!preset) return
+    const lim = MOLD_BY_ID[panel].limit
+    const cells = layoutCells(preset.rows, { x: SAFE_MARGIN, y: SAFE_MARGIN, w: lim.w - 2 * SAFE_MARGIN, h: lim.h - 2 * SAFE_MARGIN })
+    imgs.forEach((img, i) => {
+      const c = cells[i]
+      const [w, h] = containBox(img.natH / img.natW, c.w, c.h)
+      updatePlacedImageState(img.id, { width: w, height: h, x: c.x + (c.w - w) / 2, y: c.y + (c.h - h) / 2, rotation: 0 })
+    })
   }
 
-  function setInteractionMode(mode: InteractionMode) {
-    interactionMode.value = mode
+  function moveImageToPanel(id: string, panel: PanelId) {
+    const img = design.value.placedImages.find(i => i.id === id)
+    if (!img) return
+    const index = design.value.placedImages.filter(i => i.panel === panel).length
+    img.panel = panel
+    img.state = initialState(panel, img.natH / img.natW, index)
+    design.value.activePanel = panel
   }
+
+  async function setPopularDesign(did: string, src: string) {
+    const { w, h } = await measure(src)
+    design.value.placedImages = design.value.placedImages.filter(i => !i.id.startsWith('pop-'))
+    const id = `pop-${did}`
+    design.value.placedImages.unshift({
+      id, src, file: null, panel: 'front', natW: w, natH: h,
+      state: initialState('front', h / w, 0),
+    })
+    design.value.popularDesignId = did
+    design.value.activeImageId = id
+    design.value.activePanel = 'front'
+  }
+
+  function setRenderCaptures(captures: string[]) { renderCaptures.value = captures }
 
   // ── Delivery actions ───────────────────────────────
   function setDepartment(dept: string) {
@@ -146,23 +236,31 @@ export const useStore = defineStore('polo', () => {
     submitError.value = null
     try {
       const id = generateOrderId()
+      const names = ['front', 'back', 'right', 'left']
+      const allImages = design.value.placedImages.map(i => i.src)
 
-      let voucherUrl = ''
-      if (payment.value.voucherFile) {
-        voucherUrl = await uploadVoucher(payment.value.voucherFile)
-      }
+      const [voucherUrl, ...uploadResults] = await Promise.all([
+        payment.value.voucherFile ? uploadVoucher(payment.value.voucherFile) : Promise.resolve(''),
+        ...allImages.map((src, i) => uploadBase64Image(src, `${id}-design-${i}`)),
+        ...renderCaptures.value.map((cap, i) => uploadBase64Image(cap, `${id}-render-${names[i] ?? i}`)),
+      ])
+
+      const designImageUrls = uploadResults.slice(0, allImages.length)
+      const renderUrls = uploadResults.slice(allImages.length)
 
       const order: Order = {
         orderId: id,
-        createdAt: new Date().toISOString(),
+        createdAt: limaDateTime(),
         design: design.value,
         item: orderItem.value,
         delivery: delivery.value,
         payment: { ...payment.value, voucherUrl },
         status: 'pending_validation',
-        statusUpdatedAt: new Date().toISOString(),
+        statusUpdatedAt: limaDateTime(),
         estimatedDelivery: null,
         adminNotes: '',
+        designImageUrls,
+        renderUrls,
       }
 
       await createOrder(order)
@@ -189,9 +287,11 @@ export const useStore = defineStore('polo', () => {
     currentOrderId, submitting, submitError,
     isAdmin, adminOrders,
     subtotal, total, popularDesigns, deliveryRates,
-    setPoloColor, setSleeveType, setUserImage, setPopularDesign,
-    updateFrontImageState, updateBackImageState, resetImagePosition,
-    setInteractionMode, setDepartment,
+    sizeId, factor, setSize,
+    setPoloColor, setSleeveType, setPopularDesign, setInteractionMode,
+    addImageToPanel, removeImage, setActivePanel, setActiveImage,
+    updatePlacedImageState, setImageWidth, centerImage, fitFormat, applyLayout, moveImageToPanel,
+    setRenderCaptures, setDepartment,
     adminLogin, restoreAdminSession, adminLogout,
     submitOrder, resetOrder,
   }

@@ -8,23 +8,36 @@ export type OrderStatus =
   | 'delivered'
   | 'rejected'
 
+/** Posición y tamaño en CM DE REFERENCIA (talla M), relativos a la esquina sup. izq. del límite del molde. */
 export interface ImageState {
-  x: number         // canvas px from left
-  y: number         // canvas px from top
-  width: number     // px
-  height: number    // px
-  rotation: number  // degrees
+  x: number         // cm ref desde borde izq. del límite
+  y: number         // cm ref desde borde sup. del límite
+  width: number     // cm ref
+  height: number    // cm ref
+  rotation: number  // grados
   flipH: boolean
+}
+
+export type { PanelId } from '../data/molds'
+import type { PanelId } from '../data/molds'
+
+export interface PlacedImage {
+  id: string
+  src: string
+  file: File | null
+  panel: PanelId
+  state: ImageState
+  natW: number      // píxeles originales de la imagen
+  natH: number
 }
 
 export interface DesignConfig {
   poloColor: string
   sleeveType: SleeveType
-  userImageSrc: string | null    // base64 or URL for canvas draw
-  userImageFile: File | null     // original file for validation
-  frontImageState: ImageState
-  backImageState: ImageState | null  // only for long sleeve
   popularDesignId: string | null
+  placedImages: PlacedImage[]   // up to 6
+  activePanel: PanelId
+  activeImageId: string | null
 }
 
 export interface OrderItem {
@@ -62,6 +75,8 @@ export interface Order {
   statusUpdatedAt: string
   estimatedDelivery: string | null
   adminNotes: string
+  designImageUrls: string[]  // imgbb URLs of all uploaded design images
+  renderUrls: string[]       // imgbb URLs: [front, back, right, left]
 }
 
 export interface PopularDesign {
