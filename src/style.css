@@ -102,6 +102,7 @@ input:focus, select:focus, textarea:focus {
 }
 select option { background: var(--bg3); }
 input::placeholder { color: var(--txt3); }
+select:disabled { opacity: 0.45; cursor: not-allowed; }
 .field { margin-bottom: 16px; }
 .err { color: var(--err); font-size: 12px; margin-top: 4px; }
 

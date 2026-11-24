@@ -80,21 +80,27 @@
           <h3 class="section-label">Dirección de entrega</h3>
           <div class="field">
             <label>Departamento *</label>
-            <select v-model="store.delivery.department" @change="onDeptChange">
+            <select v-model="selectedDeptCode" @change="onDeptChange">
               <option value="">Selecciona departamento</option>
-              <option v-for="d in ALL_DEPARTMENTS" :key="d" :value="d">{{ d }}</option>
+              <option v-for="d in departments" :key="d.code" :value="d.code">{{ d.name }}</option>
             </select>
             <p v-if="errs.department" class="err">{{ errs.department }}</p>
           </div>
           <div class="form-row">
             <div class="field">
               <label>Provincia *</label>
-              <input v-model="store.delivery.province" placeholder="Provincia" />
+              <select v-model="selectedProvCode" :disabled="!selectedDeptCode" @change="onProvChange">
+                <option value="">{{ selectedDeptCode ? 'Selecciona provincia' : 'Primero elige un departamento' }}</option>
+                <option v-for="p in provinces" :key="p.code" :value="p.code">{{ p.name }}</option>
+              </select>
               <p v-if="errs.province" class="err">{{ errs.province }}</p>
             </div>
             <div class="field">
               <label>Distrito *</label>
-              <input v-model="store.delivery.district" placeholder="Distrito" />
+              <select v-model="selectedDistCode" :disabled="!selectedProvCode" @change="onDistChange">
+                <option value="">{{ selectedProvCode ? 'Selecciona distrito' : 'Primero elige una provincia' }}</option>
+                <option v-for="d in districts" :key="d.code" :value="d.code">{{ d.name }}</option>
+              </select>
               <p v-if="errs.district" class="err">{{ errs.district }}</p>
             </div>
           </div>
@@ -166,12 +172,23 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useStore } from '../store/index'
-import { SIZES, POLO_COLORS, ALL_DEPARTMENTS, DELIVERY_RATES } from '../data/catalog'
+import { SIZES, POLO_COLORS, DELIVERY_RATES } from '../data/catalog'
+import { getDepartments, getProvinces, getDistricts, type UbigeoItem } from '../lib/ubigeo'
+
+const departments: UbigeoItem[] = getDepartments()
 
 const store = useStore()
 const router = useRouter()
 const errs = ref<Record<string, string>>({})
 const showGuide = ref(false)
+
+// ── Ubigeo state ────────────────────────────────────────────
+const selectedDeptCode = ref('')
+const selectedProvCode = ref('')
+const selectedDistCode = ref('')
+
+const provinces = ref<UbigeoItem[]>([])
+const districts = ref<UbigeoItem[]>([])
 
 const SIZE_GUIDE = [
   { size:'XS', chest:'86-91', length:'65' },
@@ -196,7 +213,28 @@ function dec() { if (store.orderItem.quantity > 1) store.orderItem.quantity-- }
 function inc() { if (store.orderItem.quantity < 10) store.orderItem.quantity++ }
 
 function onDeptChange() {
+  const dept = departments.find(d => d.code === selectedDeptCode.value)
+  store.delivery.department = dept?.name ?? ''
   store.setDepartment(store.delivery.department)
+  selectedProvCode.value = ''
+  selectedDistCode.value = ''
+  store.delivery.province = ''
+  store.delivery.district = ''
+  provinces.value = selectedDeptCode.value ? getProvinces(selectedDeptCode.value) : []
+  districts.value = []
+}
+
+function onProvChange() {
+  const prov = provinces.value.find(p => p.code === selectedProvCode.value)
+  store.delivery.province = prov?.name ?? ''
+  selectedDistCode.value = ''
+  store.delivery.district = ''
+  districts.value = selectedProvCode.value ? getDistricts(selectedProvCode.value) : []
+}
+
+function onDistChange() {
+  const dist = districts.value.find(d => d.code === selectedDistCode.value)
+  store.delivery.district = dist?.name ?? ''
 }
 
 function adjustColor(hex: string, amount: number): string {
