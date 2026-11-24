@@ -74,6 +74,7 @@ function flattenOrder(order: Order) {
     total: order.item.pricePerUnit * order.item.quantity + order.delivery.rate,
     paymentMethod: order.payment.method,
     voucherUrl: order.payment.voucherUrl ?? '',
+    folderUrl: order.folderUrl ?? '',
     status: order.status,
   }
 }

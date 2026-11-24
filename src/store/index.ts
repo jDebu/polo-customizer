@@ -4,7 +4,8 @@ import type {
   DesignConfig, OrderItem, DeliveryInfo, PaymentInfo,
   Order, PopularDesign, InteractionMode, ImageState, PanelId,
 } from './types'
-import { uploadVoucher, uploadBase64Image } from '../lib/imgbb'
+import { uploadOrderAssets } from '../lib/storage'
+import { limaPeriod } from '../lib/drive'
 import { createOrder } from '../lib/sheets'
 import { notifyNewOrder } from '../lib/telegram'
 import { POPULAR_DESIGNS, DELIVERY_RATES } from '../data/catalog'
@@ -236,17 +237,31 @@ export const useStore = defineStore('polo', () => {
     submitError.value = null
     try {
       const id = generateOrderId()
-      const names = ['front', 'back', 'right', 'left']
-      const allImages = design.value.placedImages.map(i => i.src)
+      const k = factor.value, r1 = (v: number) => Math.round(v * 10) / 10
+      const designs = design.value.placedImages.map((i, n) => ({ src: i.src, label: i.panel, n }))
 
-      const [voucherUrl, ...uploadResults] = await Promise.all([
-        payment.value.voucherFile ? uploadVoucher(payment.value.voucherFile) : Promise.resolve(''),
-        ...allImages.map((src, i) => uploadBase64Image(src, `${id}-design-${i}`)),
-        ...renderCaptures.value.map((cap, i) => uploadBase64Image(cap, `${id}-render-${names[i] ?? i}`)),
-      ])
-
-      const designImageUrls = uploadResults.slice(0, allImages.length)
-      const renderUrls = uploadResults.slice(allImages.length)
+      // Voucher, diseños y renders → carpeta del pedido en Drive (o ImgBB si Drive no está configurado)
+      const assets = await uploadOrderAssets(id, {
+        period: limaPeriod(),
+        voucher: payment.value.voucherFile,
+        designs,
+        renders: renderCaptures.value,
+        meta: (u) => ({
+          pedido: id, creado: limaDateTime(), talla: orderItem.value.size, cantidad: orderItem.value.quantity,
+          color: design.value.poloColor, manga: design.value.sleeveType, total: total.value,
+          cliente: { nombre: delivery.value.recipientName, telefono: delivery.value.phone },
+          pago: { metodo: payment.value.method, voucher: u.voucherUrl },
+          // Medidas reales (cm) de la talla pedida, desde la esquina sup. izq. del límite del molde
+          estampados: design.value.placedImages.map((i, n) => ({
+            molde: i.panel, archivo: u.designUrls[n] || i.src,
+            ancho_cm: r1(i.state.width * k), alto_cm: r1(i.state.height * k),
+            x_cm: r1(i.state.x * k), y_cm: r1(i.state.y * k), rotacion: i.state.rotation, espejo: i.state.flipH,
+          })),
+          renders: u.renderUrls,
+          subidasFallidas: u.failed,
+        }),
+      })
+      const { voucherUrl, designUrls: designImageUrls, renderUrls } = assets
 
       const order: Order = {
         orderId: id,
@@ -261,6 +276,7 @@ export const useStore = defineStore('polo', () => {
         adminNotes: '',
         designImageUrls,
         renderUrls,
+        folderUrl: assets.folderUrl,
       }
 
       await createOrder(order)

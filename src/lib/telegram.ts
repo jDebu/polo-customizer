@@ -18,6 +18,7 @@ export async function notifyNewOrder(order: Order): Promise<void> {
     `📍 Envío: ${order.delivery.department}, ${order.delivery.province}`,
     `📱 Tel: ${order.delivery.phone}`,
     order.payment.voucherUrl ? `🧾 Voucher: ${order.payment.voucherUrl}` : `⚠️ Sin voucher`,
+    order.folderUrl ? `📁 Carpeta: ${order.folderUrl}` : ``,
     ``,
     `✅ _Validar en el panel de admin_`,
   ].join('\n')

@@ -27,7 +27,7 @@ export interface PlacedImage {
   file: File | null
   panel: PanelId
   state: ImageState
-  natW: number      // píxeles originales de la imagen
+  natW: number      // píxeles originales
   natH: number
 }
 
@@ -61,7 +61,7 @@ export interface DeliveryInfo {
 export interface PaymentInfo {
   method: PaymentMethod
   voucherFile: File | null
-  voucherUrl: string | null  // ImgBB URL after upload
+  voucherUrl: string | null  // URL tras la subida (Drive o ImgBB)
 }
 
 export interface Order {
@@ -76,7 +76,8 @@ export interface Order {
   estimatedDelivery: string | null
   adminNotes: string
   designImageUrls: string[]  // imgbb URLs of all uploaded design images
-  renderUrls: string[]       // imgbb URLs: [front, back, right, left]
+  renderUrls: string[]       // URLs de renders: [frente, espalda, derecha, izquierda]
+  folderUrl?: string         // carpeta del pedido en Google Drive
 }
 
 export interface PopularDesign {

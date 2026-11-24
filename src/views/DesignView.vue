@@ -124,9 +124,9 @@
                 <button v-for="s in SIZE_IDS" :key="s" :class="{ on: store.sizeId === s }" @click="store.setSize(s)">{{ s }}</button>
               </div>
             </section>
-
+            <!-- TODO: ocultar por ahora hasta implementar una seccion de polos con likes -->
             <!-- Popular designs -->
-            <section class="sb-section">
+            <!-- <section class="sb-section">
               <p class="sb-label">Diseños populares</p>
               <div class="pops">
                 <button v-for="d in store.popularDesigns.slice(0, 6)" :key="d.id" class="pop"
@@ -136,7 +136,7 @@
                   <img :src="d.thumbnailUrl" :alt="d.name" @error="onThumbErr" />
                 </button>
               </div>
-            </section>
+            </section> -->
 
           </div><!-- /sb-scroll -->
         </aside>
