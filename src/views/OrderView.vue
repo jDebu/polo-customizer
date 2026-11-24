@@ -50,12 +50,26 @@
           <div class="form-row">
             <div class="field">
               <label>DNI *</label>
-              <input v-model="store.delivery.dni" maxlength="8" placeholder="12345678" />
+              <input
+                :value="store.delivery.dni"
+                @input="onDniInput"
+                type="text"
+                inputmode="numeric"
+                maxlength="8"
+                placeholder="12345678"
+              />
               <p v-if="errs.dni" class="err">{{ errs.dni }}</p>
             </div>
             <div class="field">
-              <label>Teléfono *</label>
-              <input v-model="store.delivery.phone" placeholder="9XXXXXXXX" />
+              <label>Teléfono móvil *</label>
+              <input
+                :value="store.delivery.phone"
+                @input="onPhoneInput"
+                type="text"
+                inputmode="numeric"
+                maxlength="9"
+                placeholder="9XXXXXXXX"
+              />
               <p v-if="errs.phone" class="err">{{ errs.phone }}</p>
             </div>
           </div>
@@ -209,6 +223,29 @@ function validate() {
 
 function next() {
   if (validate()) router.push('/payment')
+}
+
+const onDniInput = (e: Event) => {
+  const input = e.target as HTMLInputElement
+  const clean = input.value.replace(/\D/g, '').slice(0, 8)
+  
+  input.value = clean // Fuerza a que la letra desaparezca visualmente del input
+  store.delivery.dni = clean
+}
+
+const onPhoneInput = (e: Event) => {
+  const input = e.target as HTMLInputElement
+  let clean = input.value.replace(/\D/g, '')
+  
+  // Si no empieza con 9, lo deja vacío
+  if (!clean.startsWith('9')) {
+    clean = ''
+  } else {
+    clean = clean.slice(0, 9)
+  }
+
+  input.value = clean // Fuerza a que cualquier carácter inválido desaparezca al instante
+  store.delivery.phone = clean
 }
 </script>
 
