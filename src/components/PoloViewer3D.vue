@@ -30,7 +30,7 @@ import Icon from './Icon.vue'
 const store = useStore()
 const container = ref<HTMLDivElement | null>(null)
 const threeCanvas = ref<HTMLCanvasElement | null>(null)
-const guides = ref(true)
+const guides = ref(false)
 
 let renderer: THREE.WebGLRenderer | null = null
 let scene: THREE.Scene | null = null
@@ -108,11 +108,11 @@ function stepFly() {
 /* ── Three.js init ───────────────────────────────────────── */
 function initThree() {
   if (!threeCanvas.value || !container.value) return
-  const W = container.value.clientWidth, H = container.value.clientHeight
+  const W = container.value.clientWidth || 640, H = container.value.clientHeight || 760
 
   renderer = new THREE.WebGLRenderer({ canvas: threeCanvas.value, antialias: true, alpha: true, preserveDrawingBuffer: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-  renderer.setSize(W, H)
+  renderer.setSize(W, H, false)
   renderer.outputColorSpace = THREE.SRGBColorSpace
 
   scene = new THREE.Scene()
@@ -179,7 +179,7 @@ function onResize() {
   if (!W || !H) return
   camera.aspect = W / H
   camera.updateProjectionMatrix()
-  renderer.setSize(W, H)
+  renderer.setSize(W, H, false)
 }
 
 function zoom(f: number) {
@@ -203,6 +203,10 @@ onMounted(async () => { await nextTick(); initThree() })
 async function captureViews(): Promise<string[]> {
   if (!renderer || !scene || !camera || !controls) return []
   const saved = currentPose()
+  const prevSize = renderer.getSize(new THREE.Vector2()), prevAspect = camera.aspect, prevPR = renderer.getPixelRatio()
+  // Tamaño fijo: la captura sale igual aunque el visor esté oculto o en una pantalla pequeña
+  renderer.setPixelRatio(1); renderer.setSize(720, 860, false)
+  camera.aspect = 720 / 860; camera.updateProjectionMatrix()
   redrawPrints(false)
   const shots: string[] = []
   for (const az of [0, Math.PI, Math.PI / 2, -Math.PI / 2]) {
@@ -210,8 +214,10 @@ async function captureViews(): Promise<string[]> {
     camera.position.set(Math.sin(az) * 1.9, 0.36 + 0.1, Math.cos(az) * 1.9)
     camera.lookAt(controls.target)
     renderer.render(scene, camera)
-    shots.push(renderer.domElement.toDataURL('image/jpeg', 0.9))
+    shots.push(renderer.domElement.toDataURL('image/jpeg', 0.88))
   }
+  renderer.setPixelRatio(prevPR); renderer.setSize(prevSize.x, prevSize.y, false)
+  camera.aspect = prevAspect; camera.updateProjectionMatrix()
   controls.target.set(saved.tx, saved.ty, saved.tz)
   camera.position.set(
     saved.tx + saved.r * Math.sin(saved.az) * Math.cos(saved.el),
@@ -235,7 +241,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.polo-viewer { position: relative; width: 100%; height: 100%; background: #1a1a1a; border-radius: var(--radius-lg); overflow: hidden; user-select: none; }
+.polo-viewer { position: relative; width: 100%; height: 100%; min-height: 0; background: #1a1a1a; border-radius: var(--radius-lg); overflow: hidden; user-select: none; }
 .three-canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
 .three-canvas:active { cursor: grabbing; }
 
@@ -251,5 +257,11 @@ onUnmounted(() => {
 .vt:hover, .zoom-btn:hover { background: rgba(40,40,40,.95); border-color: #555; }
 .vt:focus-visible, .zoom-btn:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
 .zoom-btns { position: absolute; right: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
-.viewer-hint { position: absolute; left: 14px; bottom: 12px; font-size: 11px; color: #555; pointer-events: none; }
+.viewer-hint { position: absolute; left: 14px; bottom: 12px; font-size: 11px; color: #777; pointer-events: none; }
+@media (max-width: 960px) {
+  .viewer-hint { display: none; }
+  .zoom-btn, .vt { width: 40px; height: 40px; }
+  .vt { width: auto; padding: 0 12px; }
+  .zoom-btns { bottom: 12px; right: 12px; }
+}
 </style>

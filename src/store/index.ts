@@ -2,15 +2,15 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type {
   DesignConfig, OrderItem, DeliveryInfo, PaymentInfo,
-  Order, PopularDesign, InteractionMode, ImageState, PanelId,
+  Order, OrderLine, PopularDesign, InteractionMode, ImageState, PanelId,
 } from './types'
 import { uploadOrderAssets } from '../lib/storage'
 import { limaPeriod } from '../lib/drive'
 import { createOrder } from '../lib/sheets'
 import { notifyNewOrder } from '../lib/telegram'
-import { POPULAR_DESIGNS, DELIVERY_RATES } from '../data/catalog'
+import { POPULAR_DESIGNS, POLO_COLORS, DELIVERY_RATES } from '../data/catalog'
 import {
-  MOLD_BY_ID, LAYOUTS, SAFE_MARGIN, containBox, fitInside, layoutCells, sizeFactor,
+  MOLD_BY_ID, LAYOUTS, SAFE_MARGIN, SIZE_IDS, containBox, fitInside, layoutCells, sizeFactor,
   type SizeId,
 } from '../data/molds'
 
@@ -69,6 +69,11 @@ export const useStore = defineStore('polo', () => {
     pricePerUnit: 45,
   })
 
+  /** Variantes del pedido (talla · color · cantidad). La estampa es la misma para todas. */
+  const lines = ref<OrderLine[]>([])
+  const linesTouched = ref(false)
+  const MAX_LINES = 10, MAX_PER_LINE = 50
+
   const delivery = ref<DeliveryInfo>({
     recipientName: '', dni: '', phone: '',
     department: '', province: '', district: '',
@@ -82,13 +87,19 @@ export const useStore = defineStore('polo', () => {
   const currentOrderId = ref<string | null>(null)
   const submitting = ref(false)
   const submitError = ref<string | null>(null)
+  /** Progreso real del envío: se usa para el overlay de carga. */
+  const submitProgress = ref<{ phase: 'idle' | 'upload' | 'register' | 'notify' | 'done'; done: number; total: number }>({
+    phase: 'idle', done: 0, total: 0,
+  })
+  let pendingOrderId: string | null = null // se reutiliza al reintentar para no dejar carpetas huérfanas
 
   // ── Admin state ────────────────────────────────────
   const isAdmin = ref(false)
   const adminOrders = ref<Order[]>([])
 
   // ── Computed ───────────────────────────────────────
-  const subtotal = computed(() => orderItem.value.pricePerUnit * orderItem.value.quantity)
+  const totalPieces = computed(() => lines.value.reduce((n, l) => n + l.quantity, 0))
+  const subtotal = computed(() => orderItem.value.pricePerUnit * totalPieces.value)
   const total = computed(() => subtotal.value + delivery.value.rate)
   const popularDesigns = computed<PopularDesign[]>(() => POPULAR_DESIGNS)
   const deliveryRates = computed(() => DELIVERY_RATES)
@@ -101,7 +112,67 @@ export const useStore = defineStore('polo', () => {
   function setPoloColor(color: string) { design.value.poloColor = color }
   function setSleeveType(type: 'short' | 'long') { design.value.sleeveType = type }
   function setInteractionMode(mode: InteractionMode) { interactionMode.value = mode }
-  function setSize(size: SizeId) { orderItem.value.size = size }
+  function setSize(size: SizeId) {
+    orderItem.value.size = size
+    if (!linesTouched.value && lines.value.length === 1) lines.value[0].size = size
+  }
+
+  // ── Variantes del pedido ───────────────────────────
+  const lineId = () => `ln-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`
+  const sameVariant = (a: OrderLine, b: OrderLine) => a.size === b.size && a.color === b.color
+
+  /** Garantiza al menos una línea. Mientras el cliente no la toque, sigue la talla y el color del diseño. */
+  function ensureLines() {
+    if (lines.value.length === 0) {
+      lines.value = [{ id: lineId(), size: sizeId.value, color: design.value.poloColor, quantity: 1 }]
+    } else if (!linesTouched.value && lines.value.length === 1) {
+      lines.value[0].size = sizeId.value
+      lines.value[0].color = design.value.poloColor
+    }
+    orderItem.value.quantity = totalPieces.value
+  }
+
+  /** Une líneas idénticas (misma talla y color) sumando cantidades. */
+  function mergeLines() {
+    const out: OrderLine[] = []
+    for (const l of lines.value) {
+      const hit = out.find(o => sameVariant(o, l))
+      if (hit) hit.quantity = Math.min(MAX_PER_LINE, hit.quantity + l.quantity)
+      else out.push(l)
+    }
+    lines.value = out
+    orderItem.value.quantity = totalPieces.value
+  }
+
+  function addLine(): boolean {
+    if (lines.value.length >= MAX_LINES) return false
+    linesTouched.value = true
+    const last = lines.value[lines.value.length - 1]
+    const color = last?.color ?? design.value.poloColor
+    // primera talla libre para ese color, para que la nueva línea no se funda con otra
+    const free = SIZE_IDS.find(s => !lines.value.some(l => l.size === s && l.color === color))
+    lines.value.push({ id: lineId(), size: free ?? 'M', color, quantity: 1 })
+    orderItem.value.quantity = totalPieces.value
+    return true
+  }
+
+  function updateLine(id: string, patch: Partial<Pick<OrderLine, 'size' | 'color' | 'quantity'>>) {
+    const l = lines.value.find(x => x.id === id)
+    if (!l) return
+    linesTouched.value = true
+    if (patch.size) l.size = patch.size
+    if (patch.color) l.color = patch.color
+    if (patch.quantity !== undefined) l.quantity = Math.max(1, Math.min(MAX_PER_LINE, Math.round(patch.quantity)))
+    // No se fusionan aquí: la línea que el cliente está editando no debe desaparecer. Se unen al continuar.
+    orderItem.value.quantity = totalPieces.value
+  }
+
+  function removeLine(id: string) {
+    if (lines.value.length <= 1) return
+    linesTouched.value = true
+    lines.value = lines.value.filter(l => l.id !== id)
+    orderItem.value.quantity = totalPieces.value
+  }
 
   async function addImageToPanel(src: string, file: File | null, panel?: PanelId): Promise<string> {
     if (design.value.placedImages.length >= 6) return ''
@@ -123,7 +194,12 @@ export const useStore = defineStore('polo', () => {
     if (design.value.activeImageId === id) design.value.activeImageId = null
   }
 
-  function setActivePanel(panel: PanelId) { design.value.activePanel = panel }
+  function setActivePanel(panel: PanelId) {
+    design.value.activePanel = panel
+    // La imagen activa siempre pertenece a la zona activa: si no, los controles editarían algo que no se ve
+    const cur = design.value.placedImages.find(i => i.id === design.value.activeImageId)
+    if (!cur || cur.panel !== panel) design.value.activeImageId = design.value.placedImages.find(i => i.panel === panel)?.id ?? null
+  }
   function setActiveImage(id: string | null) { design.value.activeImageId = id }
 
   /** Aplica el cambio y mantiene la imagen dentro del límite del molde (cm). */
@@ -233,12 +309,18 @@ export const useStore = defineStore('polo', () => {
   }
 
   async function submitOrder(): Promise<string> {
+    if (submitting.value) return currentOrderId.value ?? ''
     submitting.value = true
     submitError.value = null
+    submitProgress.value = { phase: 'upload', done: 0, total: 0 }
     try {
-      const id = generateOrderId()
+      ensureLines()
+      const id = (pendingOrderId ??= generateOrderId())
       const k = factor.value, r1 = (v: number) => Math.round(v * 10) / 10
       const designs = design.value.placedImages.map((i, n) => ({ src: i.src, label: i.panel, n }))
+      const pieces = totalPieces.value
+      const colorName = (hex: string) => POLO_COLORS.find(c => c.value.toLowerCase() === hex.toLowerCase())?.label ?? hex
+      const variantes = lines.value.map(l => ({ talla: l.size, color: colorName(l.color), hex: l.color, cantidad: l.quantity }))
 
       // Voucher, diseños y renders → carpeta del pedido en Drive (o ImgBB si Drive no está configurado)
       const assets = await uploadOrderAssets(id, {
@@ -246,12 +328,14 @@ export const useStore = defineStore('polo', () => {
         voucher: payment.value.voucherFile,
         designs,
         renders: renderCaptures.value,
+        onProgress: (done, total) => { submitProgress.value = { phase: 'upload', done, total } },
         meta: (u) => ({
-          pedido: id, creado: limaDateTime(), talla: orderItem.value.size, cantidad: orderItem.value.quantity,
-          color: design.value.poloColor, manga: design.value.sleeveType, total: total.value,
+          pedido: id, creado: limaDateTime(), variantes, piezas: pieces,
+          tallaReferencia: orderItem.value.size, manga: design.value.sleeveType, total: total.value,
           cliente: { nombre: delivery.value.recipientName, telefono: delivery.value.phone },
           pago: { metodo: payment.value.method, voucher: u.voucherUrl },
-          // Medidas reales (cm) de la talla pedida, desde la esquina sup. izq. del límite del molde
+          // Medidas reales (cm) en la talla de referencia, desde la esquina sup. izq. del límite del molde.
+          // Para otra talla se multiplican por (pecho de esa talla / 52).
           estampados: design.value.placedImages.map((i, n) => ({
             molde: i.panel, archivo: u.designUrls[n] || i.src,
             ancho_cm: r1(i.state.width * k), alto_cm: r1(i.state.height * k),
@@ -267,7 +351,8 @@ export const useStore = defineStore('polo', () => {
         orderId: id,
         createdAt: limaDateTime(),
         design: design.value,
-        item: orderItem.value,
+        item: { ...orderItem.value, size: lines.value[0].size, quantity: pieces },
+        lines: lines.value.map(l => ({ ...l })),
         delivery: delivery.value,
         payment: { ...payment.value, voucherUrl },
         status: 'pending_validation',
@@ -279,13 +364,24 @@ export const useStore = defineStore('polo', () => {
         folderUrl: assets.folderUrl,
       }
 
+      submitProgress.value = { phase: 'register', done: 0, total: 0 }
       await createOrder(order)
-      await notifyNewOrder(order)
 
+      // El aviso por Telegram no debe tumbar una venta ya registrada
+      submitProgress.value = { phase: 'notify', done: 0, total: 0 }
+      await notifyNewOrder(order).catch(e => console.warn('[telegram]', e))
+
+      submitProgress.value = { phase: 'done', done: 0, total: 0 }
       currentOrderId.value = id
+      pendingOrderId = null
       return id
     } catch (e) {
-      submitError.value = e instanceof Error ? e.message : 'Error al enviar el pedido'
+      const raw = e instanceof Error ? e.message : ''
+      // Los errores de red del navegador no le dicen nada al cliente
+      submitError.value = !raw || /fetch|network|load failed|timeout/i.test(raw)
+        ? 'No pudimos conectar con el servidor. Revisa tu conexión a internet e inténtalo de nuevo.'
+        : raw
+      submitProgress.value = { phase: 'idle', done: 0, total: 0 }
       throw e
     } finally {
       submitting.value = false
@@ -294,15 +390,19 @@ export const useStore = defineStore('polo', () => {
 
   function resetOrder() {
     currentOrderId.value = null
+    pendingOrderId = null
     submitError.value = null
+    lines.value = []
+    linesTouched.value = false
     payment.value = { method: 'yape', voucherFile: null, voucherUrl: null }
   }
 
   return {
-    design, interactionMode, orderItem, delivery, payment,
-    currentOrderId, submitting, submitError,
+    design, interactionMode, orderItem, lines, delivery, payment,
+    currentOrderId, submitting, submitError, submitProgress,
     isAdmin, adminOrders,
-    subtotal, total, popularDesigns, deliveryRates,
+    subtotal, total, totalPieces, popularDesigns, deliveryRates,
+    ensureLines, addLine, updateLine, removeLine, mergeLines, MAX_LINES, MAX_PER_LINE,
     sizeId, factor, setSize,
     setPoloColor, setSleeveType, setPopularDesign, setInteractionMode,
     addImageToPanel, removeImage, setActivePanel, setActiveImage,

@@ -1,4 +1,5 @@
 import type { Order } from '../store/types'
+import { POLO_COLORS } from '../data/catalog'
 
 const SHEETS_URL = import.meta.env.VITE_SHEETS_URL ?? ''
 
@@ -43,7 +44,20 @@ export async function getOrders(params: {
   return res.json()
 }
 
+/** "L Negro ×3 | M Azul ×1": cabe en las columnas size/poloColor que ya tiene tu hoja. */
+function variantText(order: Order) {
+  const L = order.lines
+  if (!L?.length) return { size: order.item.size, color: order.design.poloColor, qty: order.item.quantity }
+  const name = (hex: string) => POLO_COLORS.find(c => c.value.toLowerCase() === hex.toLowerCase())?.label ?? hex
+  return {
+    size: L.map(l => `${l.size} ${name(l.color)} ×${l.quantity}`).join(' | '),
+    color: [...new Set(L.map(l => name(l.color)))].join(', '),
+    qty: L.reduce((n, l) => n + l.quantity, 0),
+  }
+}
+
 function flattenOrder(order: Order) {
+  const v = variantText(order)
   const renders = order.renderUrls ?? []
   const designUrls = order.designImageUrls?.length
     ? order.designImageUrls.join(' | ')
@@ -54,10 +68,10 @@ function flattenOrder(order: Order) {
     customerName: order.delivery.recipientName,
     dni: order.delivery.dni,
     phone: order.delivery.phone,
-    poloColor: order.design.poloColor,
+    poloColor: v.color,
     sleeveType: order.design.sleeveType,
-    size: order.item.size,
-    quantity: order.item.quantity,
+    size: v.size,
+    quantity: v.qty,
     pricePerUnit: order.item.pricePerUnit,
     designUrls,
     renderFront: renders[0] ?? '',
@@ -70,8 +84,8 @@ function flattenOrder(order: Order) {
     deliveryAddress: order.delivery.address,
     deliveryRef: order.delivery.reference,
     deliveryRate: order.delivery.rate,
-    subtotal: order.item.pricePerUnit * order.item.quantity,
-    total: order.item.pricePerUnit * order.item.quantity + order.delivery.rate,
+    subtotal: order.item.pricePerUnit * v.qty,
+    total: order.item.pricePerUnit * v.qty + order.delivery.rate,
     paymentMethod: order.payment.method,
     voucherUrl: order.payment.voucherUrl ?? '',
     folderUrl: order.folderUrl ?? '',

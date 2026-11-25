@@ -2,8 +2,7 @@
 import { computed, ref } from 'vue'
 import { useStore } from '../store/index'
 import {
-  MOLDS, MOLD_BY_ID, SIZE_TABLE, SAFE_MARGIN, bodyOutline, effectiveDpi, neckPath, qualityOf, sleeveOutline,
-  type PanelId,
+  MOLD_BY_ID, SIZE_TABLE, SAFE_MARGIN, bodyOutline, effectiveDpi, neckPath, qualityOf, sleeveOutline,
 } from '../data/molds'
 import Icon from './Icon.vue'
 
@@ -11,7 +10,7 @@ const emit = defineEmits<{ (e: 'request-upload'): void; (e: 'drop-file', f: File
 
 const store = useStore()
 const svg = ref<SVGSVGElement | null>(null)
-const zoomZone = ref(false)
+const zoomZone = ref(typeof window !== 'undefined' && window.innerWidth < 961) // en mobile arranca acercado a la zona
 const snap = ref(true)
 const dragging = ref(false)
 
@@ -36,7 +35,8 @@ const view = computed(() => {
   const k = f.value, t = tbl.value
   if (zoomZone.value) {
     const m = isBody.value ? 7 : 4
-    return { x: lim.value.x - m, y: lim.value.y - m - 1.5, w: lim.value.w + 2 * m, h: lim.value.h + 2 * m + 1.5 }
+    const top = typeof window !== 'undefined' && window.innerWidth < 961 ? 6 : 0 // deja libre la franja de botones flotantes
+    return { x: lim.value.x - m, y: lim.value.y - m - 1.5 - top, w: lim.value.w + 2 * m, h: lim.value.h + 2 * m + 1.5 + top }
   }
   if (isBody.value) {
     const half = Math.max(t.chest / 2, t.shoulder / 2 + 9 * k) + 4
@@ -181,9 +181,6 @@ const readout = computed(() => {
 })
 
 /* ── Navegación de moldes ───────────────────────────────── */
-const count = (id: PanelId) => store.design.placedImages.filter(i => i.panel === id).length
-const body = MOLDS.filter(m => m.group === 'body')
-const sleeves = (side: 'left' | 'right') => MOLDS.filter(m => m.side === side)
 
 function onDrop(e: DragEvent) {
   const file = e.dataTransfer?.files[0]
@@ -193,34 +190,16 @@ function onDrop(e: DragEvent) {
 
 <template>
   <section class="mold-editor" aria-label="Editor de moldes 2D">
-    <header class="me-head">
-      <div class="tabs" role="tablist" aria-label="Molde de estampado">
-        <div class="tab-group">
-          <span class="tg-label">Cuerpo</span>
-          <button v-for="m in body" :key="m.id" role="tab" class="tab" :aria-selected="mold.id === m.id"
-                  :class="{ on: mold.id === m.id }" @click="store.setActivePanel(m.id)">
-            {{ m.short }}<i v-if="count(m.id)" class="dot">{{ count(m.id) }}</i>
-          </button>
-        </div>
-        <div v-for="side in (['left', 'right'] as const)" :key="side" class="tab-group">
-          <span class="tg-label">{{ side === 'left' ? 'Manga izq.' : 'Manga der.' }}</span>
-          <button v-for="m in sleeves(side)" :key="m.id" role="tab" class="tab" :aria-selected="mold.id === m.id"
-                  :class="{ on: mold.id === m.id }" @click="store.setActivePanel(m.id)">
-            {{ m.short }}<i v-if="count(m.id)" class="dot">{{ count(m.id) }}</i>
-          </button>
-        </div>
-      </div>
-      <div class="me-tools">
-        <button class="tool" :class="{ on: zoomZone }" :aria-pressed="zoomZone" @click="zoomZone = !zoomZone">
-          <Icon name="ruler" :size="15" /> {{ zoomZone ? 'Ver todo' : 'Ver zona' }}
-        </button>
-        <button class="tool" :class="{ on: snap }" :aria-pressed="snap" title="Alinear a pasos de 0,5 cm" @click="snap = !snap">
-          <Icon name="grid" :size="15" /> Imán
-        </button>
-      </div>
-    </header>
 
     <div class="me-stage" :class="{ dragging }" @dragover.prevent @drop.prevent="onDrop">
+      <div class="me-tools" role="toolbar" aria-label="Herramientas del molde">
+        <button class="tool" :class="{ on: zoomZone }" :aria-pressed="zoomZone" :title="zoomZone ? 'Ver el molde completo' : 'Acercar a la zona de estampado'" @click="zoomZone = !zoomZone">
+          <Icon name="ruler" :size="18" /><span class="tl">{{ zoomZone ? 'Ver todo' : 'Zona' }}</span>
+        </button>
+        <button class="tool" :class="{ on: snap }" :aria-pressed="snap" title="Alinear a pasos de 0,5 cm" @click="snap = !snap">
+          <Icon name="grid" :size="18" /><span class="tl">Imán</span>
+        </button>
+      </div>
       <svg ref="svg" :viewBox="vb" preserveAspectRatio="xMidYMid meet" tabindex="0" role="application"
            :aria-label="`${mold.label}, talla ${store.sizeId}. Flechas mueven la imagen, más y menos cambian el tamaño.`"
            @pointermove="onMove" @pointerup="onUp" @pointercancel="onUp" @keydown="onKey"
@@ -289,18 +268,18 @@ function onDrop(e: DragEvent) {
       </svg>
 
       <div v-if="images.length === 0" class="empty">
-        <p class="empty-t">{{ mold.label }} sin diseño</p>
-        <p class="empty-d">Arrastra una imagen aquí o súbela. Entrará en el formato recomendado.</p>
-        <button class="btn btn-primary btn-sm" @click="emit('request-upload')">
-          <Icon name="upload" :size="15" /> Subir imagen
-        </button>
+        <div class="empty-txt">
+          <p class="empty-t">Sube tu diseño</p>
+          <p class="empty-d">{{ mold.label }} · entra en {{ n1(mold.recommended.w * f) }} × {{ n1(mold.recommended.h * f) }} cm</p>
+        </div>
+        <button class="btn btn-primary btn-sm" @click="emit('request-upload')"><Icon name="upload" :size="16" /> Subir</button>
       </div>
     </div>
 
     <footer class="me-foot" aria-live="polite">
       <template v-if="readout">
         <span class="m"><b>{{ readout.w }} × {{ readout.h }} cm</b> impresos</span>
-        <span class="m">desde el borde: {{ readout.x }} cm izq. · {{ readout.y }} cm arriba</span>
+        <span class="m hide-sm">desde el borde: {{ readout.x }} cm izq. · {{ readout.y }} cm arriba</span>
         <span class="q" :class="readout.q.id">
           <Icon :name="readout.q.id === 'ideal' || readout.q.id === 'good' ? 'check' : 'alert'" :size="14" />
           {{ readout.dpi }} DPI · {{ readout.q.label }}
@@ -309,36 +288,26 @@ function onDrop(e: DragEvent) {
           <Icon name="alert" :size="14" /> Dentro del margen de seguridad (1 cm)
         </span>
       </template>
-      <span v-else class="m">
-        Talla {{ store.sizeId }} · pecho {{ tbl.chest }} cm · largo {{ tbl.length }} cm · hombro {{ tbl.shoulder }} cm.
-        Selecciona una imagen para ver su medida real.
-      </span>
+      <span v-else class="m">Talla {{ store.sizeId }} · pecho {{ tbl.chest }} cm · largo {{ tbl.length }} cm. Toca una imagen para ver su medida real.</span>
     </footer>
   </section>
 </template>
 
 <style scoped>
-.mold-editor { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg2); border: 1px solid var(--bd); border-radius: var(--radius-lg); overflow: hidden; }
+.mold-editor { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; background: var(--bg2); border: 1px solid var(--bd); border-radius: var(--radius-lg); overflow: hidden; }
 
-.me-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--bd); flex-wrap: wrap; }
-.tabs { display: flex; gap: 10px; flex-wrap: wrap; }
-.tab-group { display: flex; align-items: center; gap: 4px; }
-.tg-label { font-size: 11px; color: var(--txt2); margin-right: 4px; text-transform: uppercase; letter-spacing: .06em; }
-.tab { position: relative; padding: 5px 10px; border: 1px solid var(--bd); background: transparent; color: var(--txt2); border-radius: 6px; font-size: 12px; font-weight: 600; transition: all .18s; }
-.tab:hover { color: var(--txt); border-color: var(--bd2); }
-.tab.on { background: var(--ac-dark); border-color: var(--ac-dark); color: #07140c; }
-.tab:focus-visible, .tool:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
-.dot { font-style: normal; margin-left: 5px; padding: 0 4px; border-radius: 8px; font-size: 10px; background: rgba(255,255,255,.14); }
-.tab.on .dot { background: rgba(0,0,0,.2); }
-.me-tools { display: flex; gap: 6px; }
-.tool { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border: 1px solid var(--bd); background: transparent; color: var(--txt2); border-radius: 6px; font-size: 12px; font-weight: 600; transition: all .18s; }
-.tool:hover { color: var(--txt); border-color: var(--bd2); }
+.me-tools { position: absolute; z-index: 3; top: 8px; right: 8px; display: flex; gap: 6px; }
+.tool { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 12px; border: 1px solid var(--bd2); background: rgba(13,13,13,.82); backdrop-filter: blur(6px); color: var(--txt2); border-radius: 10px; font-size: 12.5px; font-weight: 600; transition: all .18s; }
+.tool:hover { color: var(--txt); border-color: #666; }
 .tool.on { color: var(--ac); border-color: var(--ac-dark); }
+.tool:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+@media (max-width: 960px) { .tool { width: 40px; padding: 0; justify-content: center; } .tl { display: none; } }
 
 .me-stage { position: relative; flex: 1; min-height: 0; background: #151515; }
-.me-stage.dragging svg { cursor: grabbing; }
-svg { width: 100%; height: 100%; display: block; outline: none; touch-action: none; }
-svg:focus-visible { box-shadow: inset 0 0 0 2px var(--ac); }
+.me-stage.dragging > svg { cursor: grabbing; }
+/* solo el lienzo: sin esto el selector alcanzaba también a los iconos hijos */
+.me-stage > svg { width: 100%; height: 100%; display: block; outline: none; touch-action: none; }
+.me-stage > svg:focus-visible { box-shadow: inset 0 0 0 2px var(--ac); }
 .sil { stroke: #777; stroke-width: .18; }
 
 .rec { fill: rgba(34,255,122,.07); stroke: none; }
@@ -356,9 +325,10 @@ svg:focus-visible { box-shadow: inset 0 0 0 2px var(--ac); }
 .handles .rot { fill: var(--pr); stroke: #fff; stroke-width: .15; cursor: grab; }
 .handles .h { fill: #fff; stroke: var(--pr); stroke-width: .18; cursor: nwse-resize; }
 
-.empty { position: absolute; left: 50%; bottom: 12%; transform: translateX(-50%); width: min(300px, 80%); text-align: center; background: rgba(13,13,13,.9); border: 1px solid var(--bd2); border-radius: var(--radius-lg); padding: 14px; }
-.empty-t { color: var(--txt); font-weight: 600; font-size: 14px; }
-.empty-d { font-size: 12px; margin: 4px 0 10px; color: var(--txt2); }
+.empty { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); width: min(380px, calc(100% - 24px)); display: flex; align-items: center; gap: 12px; background: rgba(13,13,13,.94); border: 1px solid var(--bd2); border-radius: var(--radius-lg); padding: 10px 12px 10px 14px; box-shadow: var(--shadow); }
+.empty-txt { flex: 1; min-width: 0; }
+.empty-t { color: var(--txt); font-weight: 700; font-size: 14px; line-height: 1.3; }
+.empty-d { font-size: 12px; margin: 0; color: var(--txt2); line-height: 1.4; }
 
 .me-foot { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; padding: 9px 14px; border-top: 1px solid var(--bd); font-size: 12px; min-height: 40px; }
 .me-foot .m { color: var(--txt2); }
@@ -367,4 +337,6 @@ svg:focus-visible { box-shadow: inset 0 0 0 2px var(--ac); }
 .q.ideal, .q.good { color: var(--ok); }
 .q.low { color: var(--warn); }
 .q.bad { color: var(--err); }
+@media (max-width: 600px) { .hide-sm { display: none; } .empty { bottom: 8px; padding: 8px 8px 8px 12px; } .empty-d { display: none; } .me-foot { padding: 8px 12px; gap: 4px 12px; min-height: 36px; } }
 </style>
+

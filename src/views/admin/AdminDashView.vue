@@ -128,7 +128,7 @@
         <div v-for="o in recentOrders" :key="o.orderId" class="order-row">
           <div class="order-id-sm">{{ o.orderId }}</div>
           <div>{{ o.delivery?.recipientName ?? '—' }}</div>
-          <div class="mu">{{ o.design?.sleeveType === 'short' ? 'Corta' : 'Larga' }} · T{{ o.item?.size }}</div>
+          <div class="mu">{{ o.design?.sleeveType === 'short' ? 'Corta' : 'Larga' }} · {{ o.lines?.length ? o.lines.map((l: any) => `${l.quantity}×${l.size}`).join(' ') : 'T' + o.item?.size }}</div>
           <div>S/ {{ (o.item?.pricePerUnit ?? 0) * (o.item?.quantity ?? 1) + (o.delivery?.rate ?? 0) }}</div>
           <div>
             <span :class="statusBadgeClass(o.status)">{{ statusLabel(o.status) }}</span>

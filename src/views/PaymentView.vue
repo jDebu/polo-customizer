@@ -99,52 +99,51 @@
           <p v-if="voucherError" class="err mt-4">{{ voucherError }}</p>
         </div>
 
-        <!-- Submit -->
-        <button
-          class="btn btn-primary btn-full btn-lg"
-          :disabled="!canSubmit || store.submitting"
-          @click="submit"
-        >
-          {{ store.submitting ? 'Enviando pedido…' : '✅ Enviar pedido' }}
+        <!-- Submit (desktop) -->
+        <button v-if="wide" class="btn btn-primary btn-full btn-lg" :disabled="!canSubmit || store.submitting" @click="submit">
+          <Icon name="check" :size="20" /> Enviar pedido
         </button>
-        <p v-if="store.submitError" class="err mt-8">{{ store.submitError }}</p>
-        <p class="mu text-center mt-8">
-          Al enviar confirmas que el diseño es de tu autoría o tienes derechos para usarlo.
-        </p>
+        <p v-if="!canSubmit && wide" class="mu text-center mt-8">Sube el comprobante de pago para poder enviar.</p>
+        <p class="mu text-center mt-8">Al enviar confirmas que el diseño es de tu autoría o tienes derechos para usarlo.</p>
+        <OrderSummary v-if="!wide" :delivery="true" class="mt-16" />
+        <div v-if="!wide" class="card mt-16 delivery-summary-m">
+          <p class="mu bold">Destinatario</p>
+          <p class="mu">{{ store.delivery.recipientName }} · {{ store.delivery.phone }}</p>
+          <p class="mu">{{ store.delivery.address }}, {{ store.delivery.district }}, {{ store.delivery.province }}, {{ store.delivery.department }}</p>
+        </div>
       </div>
 
-      <!-- Summary -->
-      <div class="summary-col">
-        <div class="card summary-card">
-          <h3 class="section-label">Tu pedido</h3>
-          <div class="summary-row">
-            <span class="mu">Polo × {{ store.orderItem.quantity }}</span>
-            <span>S/ {{ store.subtotal }}</span>
-          </div>
-          <div class="summary-row">
-            <span class="mu">Envío — {{ store.delivery.department }}</span>
-            <span>S/ {{ store.delivery.rate }}</span>
-          </div>
-          <div class="summary-row total-row">
-            <span class="bold">Total</span>
-            <span class="red bold" style="font-size:1.3rem">S/ {{ store.total }}</span>
-          </div>
-          <div class="delivery-summary mt-16">
-            <p class="mu bold">📦 Destinatario</p>
-            <p class="mu">{{ store.delivery.recipientName }}</p>
-            <p class="mu">{{ store.delivery.address }}, {{ store.delivery.district }}</p>
-            <p class="mu">{{ store.delivery.province }}, {{ store.delivery.department }}</p>
-          </div>
+      <!-- Summary (desktop) -->
+      <div v-if="wide" class="summary-col">
+        <OrderSummary class="summary-card" />
+        <div class="card delivery-summary mt-16">
+          <p class="mu bold">Destinatario</p>
+          <p class="mu">{{ store.delivery.recipientName }} · {{ store.delivery.phone }}</p>
+          <p class="mu">{{ store.delivery.address }}, {{ store.delivery.district }}</p>
+          <p class="mu">{{ store.delivery.province }}, {{ store.delivery.department }}</p>
         </div>
       </div>
 
     </div>
+
+    <!-- Mobile: total y botón de envío siempre visibles -->
+    <div v-if="!wide" class="cta-bar">
+      <div class="cta-tot"><span>Total a pagar</span><b>S/ {{ store.total }}</b></div>
+      <button class="btn btn-primary" :disabled="!canSubmit || store.submitting" @click="submit">
+        {{ canSubmit ? 'Enviar pedido' : 'Sube tu comprobante' }}
+      </button>
+    </div>
+
+    <SubmitOverlay :open="overlay" :error="store.submitError" @retry="submit" @close="closeOverlay" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter, onBeforeRouteLeave } from 'vue-router'
+import OrderSummary from '../components/OrderSummary.vue'
+import SubmitOverlay from '../components/SubmitOverlay.vue'
+import Icon from '../components/Icon.vue'
 import { useStore } from '../store/index'
 
 const store = useStore()
@@ -199,20 +198,41 @@ function clearVoucher() {
   if (voucherInput.value) voucherInput.value.value = ''
 }
 
+const overlay = ref(false)
+
 async function submit() {
-  if (!canSubmit.value) return
+  if (!canSubmit.value || store.submitting) return
+  overlay.value = true
   try {
     const id = await store.submitOrder()
     router.push(`/confirm/${id}`)
   } catch {
-    // error shown in template via store.submitError
+    // el overlay muestra store.submitError con «Reintentar»
   }
 }
+function closeOverlay() { overlay.value = false }
+
+// Mientras se sube no se puede salir: evita pedidos a medias
+function guard(e: BeforeUnloadEvent) { if (store.submitting) { e.preventDefault(); e.returnValue = '' } }
+onMounted(() => window.addEventListener('beforeunload', guard))
+onBeforeUnmount(() => window.removeEventListener('beforeunload', guard))
+onBeforeRouteLeave(() => !store.submitting)
+
+const mq = window.matchMedia('(min-width: 961px)')
+const wide = ref(mq.matches)
+const onMq = (e: MediaQueryListEvent) => (wide.value = e.matches)
+onMounted(() => mq.addEventListener('change', onMq))
+onBeforeUnmount(() => mq.removeEventListener('change', onMq))
 </script>
 
 <style scoped>
 .main-pad { padding: 40px 24px; }
-.payment-layout { display: grid; grid-template-columns: 1fr 320px; gap: 32px; align-items: start; }
+.payment-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 32px; align-items: start; }
+.summary-card { position: sticky; top: 24px; }
+.cta-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px)); background: var(--bg2); border-top: 1px solid var(--bd); box-shadow: 0 -8px 24px rgba(0,0,0,.35); }
+.cta-bar .btn { min-height: 52px; padding: 0 20px; font-size: 16px; }
+.cta-tot { display: flex; flex-direction: column; line-height: 1.25; font-size: 12px; color: var(--txt2); }
+.cta-tot b { font-size: 18px; color: var(--txt); font-variant-numeric: tabular-nums; }
 .payment-col {}
 .mb-24 { margin-bottom: 24px; }
 .section-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--txt2); margin-bottom: 16px; }
@@ -255,8 +275,9 @@ async function submit() {
 .total-row { font-size: 16px; border-bottom: none; padding-top: 12px; }
 .delivery-summary { background: var(--bg3); border-radius: var(--radius); padding: 12px; }
 
-@media (max-width: 800px) {
-  .payment-layout { grid-template-columns: 1fr; }
+@media (max-width: 960px) {
+  .main-pad { padding: 20px 14px 108px; }
+  .payment-layout { grid-template-columns: 1fr; gap: 0; }
   .payment-details { grid-template-columns: 1fr; }
 }
 </style>

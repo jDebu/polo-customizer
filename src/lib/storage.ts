@@ -6,6 +6,7 @@ export interface AssetInput {
   voucher: File | null
   designs: { src: string; label: string }[]
   renders: string[]
+  onProgress?: (done: number, total: number) => void
   /** contenido de pedido.json (solo Drive) */
   meta: (urls: { designUrls: string[]; renderUrls: string[]; voucherUrl: string; failed: string[] }) => object
 }
@@ -30,11 +31,14 @@ async function pool<T>(tasks: (() => Promise<T>)[], limit = 3): Promise<T[]> {
  */
 export async function uploadOrderAssets(orderId: string, a: AssetInput): Promise<AssetResult> {
   if (!driveEnabled) {
-    const [voucherUrl, ...rest] = await Promise.all([
+    const jobs: Promise<string>[] = [
       a.voucher ? uploadVoucher(a.voucher) : Promise.resolve(''),
       ...a.designs.map((d, i) => uploadBase64Image(d.src, `${orderId}-design-${i}`)),
       ...a.renders.map((r, i) => uploadBase64Image(r, `${orderId}-render-${RENDER_NAMES[i] ?? i}`)),
-    ])
+    ]
+    let finished = 0
+    a.onProgress?.(0, jobs.length)
+    const [voucherUrl, ...rest] = await Promise.all(jobs.map(j => j.finally(() => a.onProgress?.(++finished, jobs.length))))
     return { voucherUrl, designUrls: rest.slice(0, a.designs.length), renderUrls: rest.slice(a.designs.length), folderUrl: '' }
   }
 
@@ -53,7 +57,10 @@ export async function uploadOrderAssets(orderId: string, a: AssetInput): Promise
     d.src.startsWith('data:') ? up(`diseno-${i + 1}-${d.label}`, d.src) : d.src)) // diseños populares: ya son URL del catálogo
   a.renders.forEach((r, i) => tasks.push(() => up(`render-${RENDER_NAMES[i] ?? i}`, r)))
 
-  const urls = await pool(tasks)
+  const total = tasks.length + 1 // + pedido.json
+  let finished = 0
+  a.onProgress?.(0, total)
+  const urls = await pool(tasks.map(t => async () => { const r = await t(); a.onProgress?.(++finished, total); return r }))
   const voucherUrl = urls[0]
   const designUrls = urls.slice(1, 1 + a.designs.length)
   const renderUrls = urls.slice(1 + a.designs.length)
@@ -61,6 +68,7 @@ export async function uploadOrderAssets(orderId: string, a: AssetInput): Promise
   // pedido.json al final: ya incluye los enlaces y los fallos
   const meta = JSON.stringify(a.meta({ designUrls, renderUrls, voucherUrl, failed }), null, 2)
   await up('pedido.json', `data:application/json;base64,${btoa(unescape(encodeURIComponent(meta)))}`)
+  a.onProgress?.(total, total)
 
   return { voucherUrl, designUrls, renderUrls, folderUrl }
 }

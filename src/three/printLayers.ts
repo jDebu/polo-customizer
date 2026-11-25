@@ -90,10 +90,16 @@ export function sleevePrintGeometry(sg: SleeveGeo, mold: Mold, mirrorU: boolean)
 }
 
 export function printMaterial(map: THREE.Texture) {
-  return new THREE.MeshStandardMaterial({
+  const m = new THREE.MeshStandardMaterial({
     map, transparent: true, roughness: 0.88, metalness: 0, depthWrite: false,
     polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
   })
+  // Fuera de la ventana del molde no hay estampado: sin esto el último píxel de la textura se estira sobre toda la tela.
+  m.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('void main() {',
+      'void main() {\n  if (vMapUv.x < 0.0 || vMapUv.x > 1.0 || vMapUv.y < 0.0 || vMapUv.y > 1.0) discard;')
+  }
+  return m
 }
 
 export type PrintTextures = Partial<Record<PanelId, THREE.Texture>>

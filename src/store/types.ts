@@ -40,6 +40,14 @@ export interface DesignConfig {
   activeImageId: string | null
 }
 
+/** Una variante del pedido: misma estampa, distinta talla/color/cantidad. */
+export interface OrderLine {
+  id: string
+  size: 'XS' | 'S' | 'M' | 'L' | 'XL' | 'XXL'
+  color: string      // hex del polo
+  quantity: number
+}
+
 export interface OrderItem {
   size: 'XS' | 'S' | 'M' | 'L' | 'XL' | 'XXL'
   quantity: number
@@ -73,6 +81,7 @@ export interface Order {
   payment: PaymentInfo
   status: OrderStatus
   statusUpdatedAt: string
+  lines?: OrderLine[]        // variantes talla · color · cantidad
   estimatedDelivery: string | null
   adminNotes: string
   designImageUrls: string[]  // imgbb URLs of all uploaded design images

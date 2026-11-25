@@ -54,8 +54,16 @@
           </div>
           <div class="o-polo">
             <p class="mu">👕 Polo</p>
-            <p class="bold">{{ sleeveLabel(o) }} · Talla {{ o.item?.size }} × {{ o.item?.quantity }}</p>
-            <p class="mu">Color: {{ o.design?.poloColor }}</p>
+            <p class="bold">{{ sleeveLabel(o) }} · {{ o.item?.quantity }} polo{{ o.item?.quantity === 1 ? '' : 's' }}</p>
+            <template v-if="o.lines?.length">
+              <p v-for="l in o.lines" :key="l.id" class="mu">
+                <span :style="{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: l.color, border: '1px solid #666', marginRight: '6px' }" />
+                {{ l.quantity }} × {{ l.size }}
+              </p>
+            </template>
+            <template v-else>
+              <p class="mu">Talla {{ o.item?.size }} · Color: {{ o.design?.poloColor }}</p>
+            </template>
             <p class="mu">Pago: {{ o.payment?.method?.toUpperCase() }}</p>
           </div>
           <div class="o-voucher">

@@ -8,11 +8,16 @@ export async function notifyNewOrder(order: Order): Promise<void> {
     console.warn('[telegram] No token/chat_id — skipping notification for', order.orderId)
     return
   }
-  const total = order.item.pricePerUnit * order.item.quantity + order.delivery.rate
+  const pieces = order.lines?.reduce((n, l) => n + l.quantity, 0) ?? order.item.quantity
+  const total = order.item.pricePerUnit * pieces + order.delivery.rate
+  const variants = order.lines?.length
+    ? order.lines.map(l => `   • ${l.size} · ${colorName(l.color)} × ${l.quantity}`).join('\n')
+    : `   • ${order.item.size} · ${colorName(order.design.poloColor)} × ${order.item.quantity}`
   const text = [
     `🛒 *NUEVO PEDIDO ${order.orderId}*`,
     ``,
-    `👕 Polo: ${colorName(order.design.poloColor)} · ${order.design.sleeveType === 'short' ? 'manga corta' : 'manga larga'} · talla ${order.item.size} × ${order.item.quantity}`,
+    `👕 ${pieces} polo${pieces === 1 ? '' : 's'} · ${order.design.sleeveType === 'short' ? 'manga corta' : 'manga larga'}`,
+    variants,
     `💳 Pago: ${order.payment.method.toUpperCase()} · S/ ${total}`,
     `👤 Cliente: ${order.delivery.recipientName} (DNI: ${order.delivery.dni})`,
     `📍 Envío: ${order.delivery.department}, ${order.delivery.province}`,
