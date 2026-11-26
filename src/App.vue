@@ -1,6 +1,6 @@
 <template>
   <div id="polo-app" :class="{ 'is-design': isDesign }">
-    <header class="app-header">
+    <header v-if="!isAdminArea" class="app-header">
       <div class="container row">
         <router-link to="/" class="header-logo">Polo<span>Print</span></router-link>
         <div class="spacer" />
@@ -36,9 +36,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useStore } from './store/index'
+import { useCatalog } from './store/catalog'
 
 const store = useStore()
 const route = useRoute()
@@ -46,6 +47,15 @@ const route = useRoute()
 const checkoutPaths = ['/design', '/order', '/payment', '/confirm']
 const showSteps = computed(() => checkoutPaths.some(p => route.path.startsWith(p)))
 const isDesign = computed(() => route.path.startsWith('/design'))
+const isAdminArea = computed(() => route.path.startsWith('/admin'))
+
+// Catálogo vigente (colores, tallas, precio, agotados) desde la hoja
+const catalog = useCatalog()
+onMounted(async () => {
+  await catalog.load()
+  store.setPrice(catalog.price)
+  if (!catalog.colorActive(store.design.poloColor) && catalog.colors[0]) store.setPoloColor(catalog.colors[0].value)
+})
 
 function stepClass(path: string) {
   const idx = checkoutPaths.indexOf(path)

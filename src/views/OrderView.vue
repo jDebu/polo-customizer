@@ -7,6 +7,7 @@
         <h2 style="margin-bottom:24px">Datos de envío</h2>
 
         <OrderLines class="mb-24" />
+        <p v-if="linesError" class="err mb-24" role="alert">{{ linesError }}</p>
         <OrderSummary v-if="!wide" class="mb-24" />
 
         <!-- Recipient -->
@@ -108,6 +109,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useStore } from '../store/index'
 import OrderLines from '../components/OrderLines.vue'
+import { useCatalog } from '../store/catalog'
 import OrderSummary from '../components/OrderSummary.vue'
 import Icon from '../components/Icon.vue'
 import { getDepartments, getProvinces, getDistricts, type UbigeoItem } from '../lib/ubigeo'
@@ -115,6 +117,7 @@ import { getDepartments, getProvinces, getDistricts, type UbigeoItem } from '../
 const departments: UbigeoItem[] = getDepartments()
 
 const store = useStore()
+const catalog = useCatalog()
 const router = useRouter()
 const errs = ref<Record<string, string>>({})
 
@@ -172,7 +175,14 @@ function validate() {
   return !Object.keys(e).length
 }
 
+const linesError = ref('')
 function next() {
+  linesError.value = ''
+  if (store.lines.some(l => !catalog.isAvailable(l.color, l.size))) {
+    linesError.value = 'Hay variantes que ya no están disponibles. Cámbialas para continuar.'
+    document.querySelector('.lines')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    return
+  }
   if (validate()) { store.mergeLines(); router.push('/payment'); return }
   // lleva al primer campo con error (en mobile el error puede quedar fuera de pantalla)
   setTimeout(() => document.querySelector('.err')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50)

@@ -31,6 +31,19 @@ const PATHS: Record<string, string> = {
   info: 'M12 8h.01M11 12h1v5h1M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18',
   cart: 'M3 4h2l2.4 11h10.2L20 7H6M9 20h.01M17 20h.01',
   copy: 'M9 9h11v11H9zM5 15V4h11',
+  dash: 'M3 3h8v10H3zM13 3h8v6h-8zM13 11h8v10h-8zM3 15h8v6H3z',
+  orders: 'M5 4h14v16H5zM9 9h6M9 13h6M9 17h3',
+  logout: 'M9 4H5v16h4M16 8l4 4-4 4M20 12H9',
+  search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-5-5',
+  external: 'M14 4h6v6M20 4l-9 9M18 14v6H4V6h6',
+  phone: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z',
+  clock: 'M12 7v5l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18',
+  eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+  save: 'M5 3h12l4 4v14H5zM8 3v6h8M8 21v-7h8v7',
+  ban: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM5.6 5.6l12.8 12.8',
+  truck: 'M2 6h11v10H2zM13 9h4l3 3v4h-7M6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
+  folder: 'M3 6h6l2 2h10v11H3z',
+  undo: 'M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3',
 }
 </script>
 

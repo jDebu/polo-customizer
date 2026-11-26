@@ -3,12 +3,14 @@ import { computed, ref } from 'vue'
 import { useStore } from '../store/index'
 import Icon from './Icon.vue'
 import { POLO_COLORS } from '../data/catalog'
+import { useCatalog } from '../store/catalog'
 import { LAYOUTS, MOLDS, MOLD_BY_ID, SIZE_IDS, SIZE_TABLE, layoutCells, type PanelId } from '../data/molds'
 
 const emit = defineEmits<{ (e: 'upload'): void }>()
 const props = defineProps<{ uploadError?: string }>()
 
 const store = useStore()
+const catalog = useCatalog()
 const tab = ref<'img' | 'fmt' | 'polo'>('img')
 const open = ref(true) // mobile: permite ocultar el panel para ver el molde más grande
 const TABS = [
@@ -135,7 +137,7 @@ const colorName = computed(() => POLO_COLORS.find(c => c.value === store.design.
       <div v-show="tab === 'polo'" id="panel-polo" role="tabpanel" aria-labelledby="tab-polo" class="pn">
         <p class="lab">Color de la vista previa <b>· {{ colorName }}</b></p>
         <div class="sw">
-          <button v-for="c in POLO_COLORS" :key="c.value" class="swatch" :class="{ on: store.design.poloColor === c.value }"
+          <button v-for="c in catalog.colors" :key="c.value" class="swatch" :class="{ on: store.design.poloColor === c.value }"
                   :style="{ background: c.value }" :aria-label="c.label" :aria-pressed="store.design.poloColor === c.value"
                   @click="store.setPoloColor(c.value)"><Icon v-if="store.design.poloColor === c.value" name="check" :size="16" class="ck" /></button>
         </div>

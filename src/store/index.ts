@@ -7,12 +7,17 @@ import type {
 import { uploadOrderAssets } from '../lib/storage'
 import { limaPeriod } from '../lib/drive'
 import { createOrder } from '../lib/sheets'
+import { adminAuth, backendConfigured } from '../lib/adminApi'
+import { useCatalog } from './catalog'
 import { notifyNewOrder } from '../lib/telegram'
 import { POPULAR_DESIGNS, POLO_COLORS, DELIVERY_RATES } from '../data/catalog'
 import {
   MOLD_BY_ID, LAYOUTS, SAFE_MARGIN, SIZE_IDS, containBox, fitInside, layoutCells, sizeFactor,
   type SizeId,
 } from '../data/molds'
+
+/** Fecha ISO (UTC): no ambigua y Sheets/Apps Script la interpretan igual en cualquier región. */
+const nowISO = () => new Date().toISOString()
 
 function limaDateTime(): string {
   return new Date().toLocaleString('en-US', {
@@ -95,6 +100,7 @@ export const useStore = defineStore('polo', () => {
 
   // ── Admin state ────────────────────────────────────
   const isAdmin = ref(false)
+  const adminToken = ref('')
   const adminOrders = ref<Order[]>([])
 
   // ── Computed ───────────────────────────────────────
@@ -147,11 +153,20 @@ export const useStore = defineStore('polo', () => {
   function addLine(): boolean {
     if (lines.value.length >= MAX_LINES) return false
     linesTouched.value = true
+    const cat = useCatalog()
     const last = lines.value[lines.value.length - 1]
-    const color = last?.color ?? design.value.poloColor
-    // primera talla libre para ese color, para que la nueva línea no se funda con otra
-    const free = SIZE_IDS.find(s => !lines.value.some(l => l.size === s && l.color === color))
-    lines.value.push({ id: lineId(), size: free ?? 'M', color, quantity: 1 })
+    const lastColor = last?.color ?? design.value.poloColor
+    // primera combinación libre y disponible, empezando por el color de la última variante
+    const colorsOrder = [lastColor, ...cat.colors.map(c => c.value).filter(h => h.toLowerCase() !== lastColor.toLowerCase())]
+    for (const hex of colorsOrder) {
+      for (const s of cat.sizes) {
+        if (lines.value.some(l => l.size === s && l.color.toLowerCase() === hex.toLowerCase()) || !cat.isAvailable(hex, s)) continue
+        lines.value.push({ id: lineId(), size: s as SizeId, color: hex, quantity: 1 })
+        orderItem.value.quantity = totalPieces.value
+        return true
+      }
+    }
+    lines.value.push({ id: lineId(), size: 'M', color: lastColor, quantity: 1 })
     orderItem.value.quantity = totalPieces.value
     return true
   }
@@ -282,25 +297,39 @@ export const useStore = defineStore('polo', () => {
   }
 
   // ── Admin actions ──────────────────────────────────
-  function adminLogin(pin: string): boolean {
-    const correctPin = import.meta.env.VITE_ADMIN_PIN ?? '1234'
-    if (pin === correctPin) {
-      isAdmin.value = true
-      localStorage.setItem('admin_exp', String(Date.now() + 8 * 3600 * 1000))
-      return true
+  /** Valida el PIN contra el servidor (Apps Script). Sin backend configurado solo sirve en demo local. */
+  async function adminLogin(pin: string): Promise<boolean> {
+    let ok = false
+    if (backendConfigured) {
+      ok = await adminAuth(pin)
+    } else {
+      ok = pin === (import.meta.env.VITE_ADMIN_PIN ?? '1234')
     }
-    return false
+    if (ok) {
+      isAdmin.value = true
+      adminToken.value = pin
+      localStorage.setItem('admin_exp', String(Date.now() + 8 * 3600 * 1000))
+      localStorage.setItem('admin_tok', pin)
+    }
+    return ok
   }
 
   function restoreAdminSession() {
     const exp = Number(localStorage.getItem('admin_exp') ?? '0')
-    if (exp > Date.now()) isAdmin.value = true
+    if (exp > Date.now()) {
+      isAdmin.value = true
+      adminToken.value = localStorage.getItem('admin_tok') ?? ''
+    }
   }
 
   function adminLogout() {
     isAdmin.value = false
+    adminToken.value = ''
     localStorage.removeItem('admin_exp')
+    localStorage.removeItem('admin_tok')
   }
+
+  function setPrice(n: number) { if (n > 0) orderItem.value.pricePerUnit = n }
 
   // ── Checkout ───────────────────────────────────────
   function generateOrderId(): string {
@@ -349,14 +378,14 @@ export const useStore = defineStore('polo', () => {
 
       const order: Order = {
         orderId: id,
-        createdAt: limaDateTime(),
+        createdAt: nowISO(),
         design: design.value,
         item: { ...orderItem.value, size: lines.value[0].size, quantity: pieces },
         lines: lines.value.map(l => ({ ...l })),
         delivery: delivery.value,
         payment: { ...payment.value, voucherUrl },
         status: 'pending_validation',
-        statusUpdatedAt: limaDateTime(),
+        statusUpdatedAt: nowISO(),
         estimatedDelivery: null,
         adminNotes: '',
         designImageUrls,
@@ -400,7 +429,7 @@ export const useStore = defineStore('polo', () => {
   return {
     design, interactionMode, orderItem, lines, delivery, payment,
     currentOrderId, submitting, submitError, submitProgress,
-    isAdmin, adminOrders,
+    isAdmin, adminToken, adminOrders, setPrice,
     subtotal, total, totalPieces, popularDesigns, deliveryRates,
     ensureLines, addLine, updateLine, removeLine, mergeLines, MAX_LINES, MAX_PER_LINE,
     sizeId, factor, setSize,

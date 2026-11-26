@@ -17,33 +17,6 @@ export async function createOrder(order: Order): Promise<void> {
   })
 }
 
-export async function updateOrderStatus(
-  orderId: string,
-  status: string,
-  notes = '',
-  estimatedDelivery = '',
-): Promise<void> {
-  if (!SHEETS_URL) return
-  await fetch(`${SHEETS_URL}?action=updateStatus`, {
-    method: 'POST',
-    mode: 'no-cors',
-    headers: { 'Content-Type': 'text/plain' },
-    body: JSON.stringify({ orderId, status, notes, estimatedDelivery }),
-  })
-}
-
-export async function getOrders(params: {
-  status?: string
-  from?: string
-  to?: string
-} = {}): Promise<Order[]> {
-  if (!SHEETS_URL) return []
-  const qs = new URLSearchParams({ action: 'getOrders', ...params }).toString()
-  const res = await fetch(`${SHEETS_URL}?${qs}`)
-  if (!res.ok) return []
-  return res.json()
-}
-
 /** "L Negro ×3 | M Azul ×1": cabe en las columnas size/poloColor que ya tiene tu hoja. */
 function variantText(order: Order) {
   const L = order.lines
@@ -89,6 +62,7 @@ function flattenOrder(order: Order) {
     paymentMethod: order.payment.method,
     voucherUrl: order.payment.voucherUrl ?? '',
     folderUrl: order.folderUrl ?? '',
+    variants: JSON.stringify((order.lines ?? []).map(l => ({ size: l.size, color: l.color, quantity: l.quantity }))),
     status: order.status,
   }
 }

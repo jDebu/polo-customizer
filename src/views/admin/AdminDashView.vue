@@ -1,284 +1,242 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useRouter } from 'vue-router'
+import { useAdmin } from '../../store/admin'
+import { backendConfigured } from '../../lib/adminApi'
+import { PAID, STATUSES, STATUS_META, limaDay, money, timeAgo, type AdminOrder, type Status } from '../../lib/orderModel'
+import Icon from '../../components/Icon.vue'
+import StatusBadge from '../../components/admin/StatusBadge.vue'
+
+const admin = useAdmin()
+const router = useRouter()
+
+const daysAgo = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return limaDay(d) }
+const dayOf = (o: AdminOrder) => (o.createdAt ? limaDay(o.createdAt) : '')
+const live = computed(() => admin.orders.filter(o => o.status !== 'rejected'))
+const paid = computed(() => admin.orders.filter(o => PAID.includes(o.status)))
+
+function sales(fromDay: string) {
+  const list = paid.value.filter(o => dayOf(o) >= fromDay)
+  return { amount: list.reduce((n, o) => n + o.total, 0), count: list.length }
+}
+const kpis = computed(() => [
+  { k: 'Cobrado hoy', ...sales(daysAgo(0)) },
+  { k: 'Últimos 7 días', ...sales(daysAgo(6)) },
+  { k: 'Últimos 30 días', ...sales(daysAgo(29)) },
+])
+const pendingAmount = computed(() => admin.pending.reduce((n, o) => n + o.total, 0))
+const attention = computed(() => [...admin.pending].sort((a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0)).slice(0, 5))
+
+/* Pedidos por día (14 días, sin rechazados) */
+const WD = ['D', 'L', 'M', 'M', 'J', 'V', 'S']
+const series = computed(() => {
+  const days = Array.from({ length: 14 }, (_, i) => daysAgo(13 - i))
+  const rows = days.map(d => {
+    const list = live.value.filter(o => dayOf(o) === d)
+    const dt = new Date(`${d}T12:00:00`)
+    return { d, n: list.length, amount: list.reduce((s, o) => s + o.total, 0), label: String(dt.getDate()), wd: WD[dt.getDay()] }
+  })
+  return { rows, max: Math.max(1, ...rows.map(r => r.n)) }
+})
+const summaryChart = computed(() => `Pedidos de los últimos 14 días: ${series.value.rows.map(r => `${r.d} ${r.n}`).join(', ')}`)
+
+/* Distribuciones (30 días, sin rechazados) */
+const recent = computed(() => live.value.filter(o => dayOf(o) >= daysAgo(29)))
+const payments = computed(() => {
+  const m = new Map<string, number>()
+  recent.value.forEach(o => m.set(o.payment || 'otro', (m.get(o.payment || 'otro') ?? 0) + 1))
+  const total = recent.value.length || 1
+  let off = 0
+  return [...m].sort((a, b) => b[1] - a[1]).map(([k, n], i) => {
+    const pct = (n / total) * 100
+    const r = { k, n, pct: Math.round(pct), dash: `${pct} ${100 - pct}`, off: -off, color: ['#e84040', '#8b5cf6', '#6cb4ff'][i % 3] }
+    off += pct
+    return r
+  })
+})
+function tally(pick: (o: AdminOrder) => { key: string; hex?: string; n: number }[]) {
+  const m = new Map<string, { n: number; hex?: string }>()
+  recent.value.forEach(o => pick(o).forEach(x => { const c = m.get(x.key) ?? { n: 0, hex: x.hex }; c.n += x.n; m.set(x.key, c) }))
+  const rows = [...m].map(([k, v]) => ({ k, ...v })).sort((a, b) => b.n - a.n).slice(0, 6)
+  return { rows, max: Math.max(1, ...rows.map(r => r.n)) }
+}
+const topColors = computed(() => tally(o => o.lines.map(l => ({ key: l.colorName, hex: l.hex, n: l.qty }))))
+const topSizes = computed(() => tally(o => o.lines.map(l => ({ key: l.size, n: l.qty }))))
+const pipeline = computed(() => STATUSES.map(s => ({ s, n: admin.orders.filter(o => o.status === s && dayOf(o) >= daysAgo(29)).length })))
+
+const go = (q: Record<string, string>) => router.push({ path: '/admin/orders', query: q })
+</script>
+
 <template>
-  <div class="container dash-pad">
-
-    <!-- Header -->
-    <div class="row mb-24">
-      <div>
-        <h2>Panel de administración</h2>
-        <p class="mu">PoloPrint — ventas y pedidos</p>
-      </div>
-      <div class="spacer" />
-      <router-link to="/admin/orders" class="btn btn-primary">
-        Ver pedidos
-      </router-link>
-      <button class="btn btn-ghost" @click="store.adminLogout(); $router.push('/admin/login')">
-        Cerrar sesión
-      </button>
+  <div class="dash">
+    <div v-if="!backendConfigured" class="card note">
+      <h3>Conecta tu hoja de cálculo</h3>
+      <p>Sin <code>VITE_SHEETS_URL</code> no hay pedidos que mostrar. Sigue <code>docs/ADMIN_SETUP.md</code>.</p>
+    </div>
+    <div v-else-if="admin.error" class="card note err" role="alert">
+      <h3>No se pudieron cargar los datos</h3><p>{{ admin.error }}</p>
+      <button class="btn btn-primary btn-sm" @click="admin.load()">Reintentar</button>
     </div>
 
-    <!-- KPI cards -->
-    <div class="kpi-grid mb-32">
-      <div class="card kpi-card">
-        <p class="kpi-label">Ventas hoy</p>
-        <p class="kpi-value">S/ {{ kpi.today }}</p>
-        <p class="mu">{{ kpi.todayCount }} pedido(s)</p>
+    <!-- Prioridad: lo que necesita acción -->
+    <section class="hero" :class="{ clear: !admin.pending.length }" aria-labelledby="att-h">
+      <div class="hero-t">
+        <div>
+          <h2 id="att-h">{{ admin.pending.length ? `${admin.pending.length} pedido${admin.pending.length === 1 ? '' : 's'} por validar` : 'Todo al día' }}</h2>
+          <p>{{ admin.pending.length ? `${money(pendingAmount)} esperando que confirmes el pago.` : 'No hay comprobantes pendientes de revisar.' }}</p>
+        </div>
+        <button v-if="admin.pending.length" class="btn btn-primary" @click="go({ status: 'pending_validation' })">Revisar pagos <Icon name="arrow-right" :size="18" /></button>
       </div>
-      <div class="card kpi-card">
-        <p class="kpi-label">Esta semana</p>
-        <p class="kpi-value">S/ {{ kpi.week }}</p>
-        <p class="mu">{{ kpi.weekCount }} pedido(s)</p>
-      </div>
-      <div class="card kpi-card">
-        <p class="kpi-label">Este mes</p>
-        <p class="kpi-value">S/ {{ kpi.month }}</p>
-        <p class="mu">{{ kpi.monthCount }} pedido(s)</p>
-      </div>
-      <div class="card kpi-card pending-card">
-        <p class="kpi-label">Por validar</p>
-        <p class="kpi-value warn">{{ kpi.pendingCount }}</p>
-        <router-link to="/admin/orders?filter=pending_validation" class="mu">Ver pendientes →</router-link>
-      </div>
-    </div>
+      <ul v-if="attention.length" class="att">
+        <li v-for="o in attention" :key="o.id">
+          <button class="att-r" @click="go({ open: o.id })">
+            <span class="a-n">{{ o.name || o.id.slice(-9) }}</span>
+            <span class="a-m">{{ o.pieces }} polo{{ o.pieces === 1 ? '' : 's' }} · {{ o.payment }} · {{ timeAgo(o.createdAt) }}</span>
+            <b>{{ money(o.total) }}</b>
+            <Icon name="chevron-right" :size="18" />
+          </button>
+        </li>
+      </ul>
+    </section>
 
-    <!-- Charts row -->
-    <div class="charts-row mb-32">
+    <section class="kpis" aria-label="Ventas cobradas">
+      <div v-for="k in kpis" :key="k.k" class="kpi">
+        <p class="k">{{ k.k }}</p>
+        <p class="v">{{ money(k.amount) }}</p>
+        <p class="s">{{ k.count }} pedido{{ k.count === 1 ? '' : 's' }}</p>
+      </div>
+      <p class="kpi-n">Solo cuenta pedidos con el pago ya confirmado.</p>
+    </section>
 
-      <!-- Bar chart: orders per day (last 14 d) -->
-      <div class="card chart-card">
-        <h3 class="chart-title">Pedidos últimos 14 días</h3>
-        <div class="bar-chart">
-          <div
-            v-for="(d, i) in barData"
-            :key="i"
-            class="bar-col"
-            :title="`${d.label}: ${d.count} pedido(s) · S/${d.total}`"
-          >
-            <div class="bar" :style="{ height: `${barHeight(d.count)}%` }" />
-            <span class="bar-label">{{ d.label }}</span>
+    <section class="pipe card" aria-label="Estado de los pedidos (30 días)">
+      <h3 class="ct">Flujo de pedidos <span>últimos 30 días</span></h3>
+      <div class="pp">
+        <button v-for="p in pipeline" :key="p.s" class="ps" :class="STATUS_META[p.s].tone" @click="go({ status: p.s })">
+          <b>{{ p.n }}</b><span>{{ STATUS_META[p.s].plural }}</span>
+        </button>
+      </div>
+    </section>
+
+    <div class="charts">
+      <section class="card c-bars">
+        <h3 class="ct">Pedidos por día <span>últimos 14 días</span></h3>
+        <div class="bars" role="img" :aria-label="summaryChart">
+          <div v-for="r in series.rows" :key="r.d" class="bar" :title="`${r.d}: ${r.n} pedido(s) · ${money(r.amount)}`">
+            <span class="bn">{{ r.n || '' }}</span>
+            <i :style="{ height: `${(r.n / series.max) * 100}%` }" :class="{ z: !r.n }" />
+            <span class="bd">{{ r.label }}</span><span class="bw">{{ r.wd }}</span>
           </div>
         </div>
-      </div>
+      </section>
 
-      <!-- Donut: Yape vs Plin -->
-      <div class="card chart-card chart-sm">
-        <h3 class="chart-title">Método de pago</h3>
-        <div class="donut-wrap">
-          <svg viewBox="0 0 100 100" class="donut-svg">
-            <circle cx="50" cy="50" r="38" fill="none" stroke="#333" stroke-width="12" />
-            <circle
-              cx="50" cy="50" r="38" fill="none"
-              stroke="#e84040" stroke-width="12"
-              stroke-dasharray="{{ yapePct * 2.388 }} 238.8"
-              stroke-dashoffset="59.7"
-            />
-            <circle
-              cx="50" cy="50" r="38" fill="none"
-              stroke="#7c3aed" stroke-width="12"
-              :stroke-dasharray="`${plinPct * 2.388} 238.8`"
-              :stroke-dashoffset="`${-(yapePct * 2.388 - 59.7)}`"
-            />
+      <section class="card">
+        <h3 class="ct">Método de pago</h3>
+        <div v-if="payments.length" class="donut">
+          <svg viewBox="0 0 36 36" role="img" :aria-label="payments.map(p => `${p.k} ${p.pct}%`).join(', ')">
+            <circle cx="18" cy="18" r="15.915" fill="none" stroke="var(--bg3)" stroke-width="4" />
+            <circle v-for="p in payments" :key="p.k" cx="18" cy="18" r="15.915" fill="none" :stroke="p.color" stroke-width="4"
+                    :stroke-dasharray="p.dash" :stroke-dashoffset="p.off" transform="rotate(-90 18 18)" />
+            <text x="18" y="19.5" text-anchor="middle" class="dt">{{ recent.length }}</text>
           </svg>
-          <div class="donut-center">
-            <p class="bold" style="font-size:1.1rem">{{ kpi.todayCount + kpi.weekCount }}</p>
-            <p class="mu" style="font-size:11px">total</p>
-          </div>
+          <ul><li v-for="p in payments" :key="p.k"><i :style="{ background: p.color }" /><span class="pn">{{ p.k }}</span><b>{{ p.pct }}%</b></li></ul>
         </div>
-        <div class="donut-legend">
-          <div class="legend-item">
-            <span class="dot" style="background:#e84040" />
-            <span>Yape</span>
-            <span class="spacer" />
-            <span class="bold">{{ yapePct }}%</span>
-          </div>
-          <div class="legend-item">
-            <span class="dot" style="background:#7c3aed" />
-            <span>Plin</span>
-            <span class="spacer" />
-            <span class="bold">{{ plinPct }}%</span>
-          </div>
-        </div>
-      </div>
+        <p v-else class="empty">Sin pedidos en el periodo.</p>
+      </section>
 
-      <!-- Top colors -->
-      <div class="card chart-card chart-sm">
-        <h3 class="chart-title">Colores más pedidos</h3>
-        <div class="color-rank">
-          <div v-for="(c, i) in topColors" :key="c.color" class="color-rank-item">
-            <span class="rank-num">{{ i + 1 }}</span>
-            <span class="color-dot" :style="{ background: c.color }" />
-            <span>{{ c.name }}</span>
-            <span class="spacer" />
-            <span class="mu">{{ c.count }} uds</span>
-          </div>
-        </div>
-      </div>
+      <section class="card">
+        <h3 class="ct">Colores más pedidos <span>polos</span></h3>
+        <ul v-if="topColors.rows.length" class="rank">
+          <li v-for="r in topColors.rows" :key="r.k"><i class="sw" :style="{ background: r.hex }" /><span class="rn">{{ r.k }}</span>
+            <span class="rb"><u :style="{ width: `${(r.n / topColors.max) * 100}%` }" /></span><b>{{ r.n }}</b></li>
+        </ul>
+        <p v-else class="empty">Sin datos todavía.</p>
+        <h3 class="ct ct2">Tallas más pedidas</h3>
+        <ul v-if="topSizes.rows.length" class="rank">
+          <li v-for="r in topSizes.rows" :key="r.k"><span class="rn sz">{{ r.k }}</span>
+            <span class="rb"><u :style="{ width: `${(r.n / topSizes.max) * 100}%` }" /></span><b>{{ r.n }}</b></li>
+        </ul>
+      </section>
     </div>
-
-    <!-- Recent orders preview -->
-    <div class="card">
-      <div class="row mb-16">
-        <h3>Pedidos recientes</h3>
-        <span class="spacer" />
-        <router-link to="/admin/orders" class="mu">Ver todos →</router-link>
-      </div>
-      <div v-if="recentOrders.length === 0" class="empty-state">
-        <p class="mu">No hay pedidos aún. Los pedidos aparecerán aquí cuando los clientes compren.</p>
-      </div>
-      <div v-else class="orders-preview">
-        <div v-for="o in recentOrders" :key="o.orderId" class="order-row">
-          <div class="order-id-sm">{{ o.orderId }}</div>
-          <div>{{ o.delivery?.recipientName ?? '—' }}</div>
-          <div class="mu">{{ o.design?.sleeveType === 'short' ? 'Corta' : 'Larga' }} · {{ o.lines?.length ? o.lines.map((l: any) => `${l.quantity}×${l.size}`).join(' ') : 'T' + o.item?.size }}</div>
-          <div>S/ {{ (o.item?.pricePerUnit ?? 0) * (o.item?.quantity ?? 1) + (o.delivery?.rate ?? 0) }}</div>
-          <div>
-            <span :class="statusBadgeClass(o.status)">{{ statusLabel(o.status) }}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Demo notice -->
-    <div class="card mt-24" style="border-color: rgba(245,166,35,.3); background: rgba(245,166,35,.05)">
-      <p class="mu">⚠️ <strong>Modo demostración</strong> — Los datos de ventas son simulados. Conecta Google Sheets configurando <code>VITE_SHEETS_URL</code> en <code>.env.local</code> para ver pedidos reales.</p>
-    </div>
-
   </div>
 </template>
 
-<script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useStore } from '../../store/index'
-import type { Order } from '../../store/types'
-import { getOrders } from '../../lib/sheets'
-import { POLO_COLORS } from '../../data/catalog'
-
-const store = useStore()
-const recentOrders = ref<Order[]>([])
-
-onMounted(async () => {
-  const orders = await getOrders({ from: thirtyDaysAgo() })
-  recentOrders.value = orders.slice(0, 5)
-})
-
-function thirtyDaysAgo() {
-  const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString()
-}
-
-// Demo KPI data
-const kpi = ref({
-  today: 135, todayCount: 3,
-  week: 585, weekCount: 13,
-  month: 2250, monthCount: 50,
-  pendingCount: 2,
-})
-
-// Bar chart: last 14 days (simulated)
-const barData = computed(() => {
-  const days = []
-  for (let i = 13; i >= 0; i--) {
-    const d = new Date(); d.setDate(d.getDate() - i)
-    days.push({
-      label: d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short' }),
-      count: Math.floor(Math.random() * 5),
-      total: Math.floor(Math.random() * 300),
-    })
-  }
-  return days
-})
-
-const maxCount = computed(() => Math.max(...barData.value.map(d => d.count), 1))
-function barHeight(count: number) {
-  return Math.max(4, (count / maxCount.value) * 100)
-}
-
-// Payment split (simulated)
-const yapePct = ref(62)
-const plinPct = computed(() => 100 - yapePct.value)
-
-// Top colors (simulated)
-const topColors = computed(() => [
-  { color: '#111111', name: 'Negro', count: 22 },
-  { color: '#ffffff', name: 'Blanco', count: 18 },
-  { color: '#1a2a4a', name: 'Azul marino', count: 7 },
-  { color: '#cc2222', name: 'Rojo', count: 3 },
-])
-
-function statusBadgeClass(status: string) {
-  const map: Record<string, string> = {
-    pending_validation: 'badge badge-warn',
-    confirmed: 'badge badge-ok',
-    in_production: 'badge badge-ok',
-    shipped: 'badge badge-neu',
-    delivered: 'badge badge-ok',
-    rejected: 'badge badge-err',
-  }
-  return map[status] ?? 'badge badge-neu'
-}
-
-function statusLabel(status: string) {
-  const map: Record<string, string> = {
-    pending_validation: '⏳ Validando',
-    confirmed: '✅ Confirmado',
-    in_production: '🖨 Producción',
-    shipped: '🚚 Enviado',
-    delivered: '📦 Entregado',
-    rejected: '❌ Rechazado',
-  }
-  return map[status] ?? status
-}
-</script>
-
 <style scoped>
-.dash-pad { padding: 32px 24px; }
-.mb-24 { margin-bottom: 24px; }
-.mb-32 { margin-bottom: 32px; }
+.dash { display: flex; flex-direction: column; gap: 16px; }
+.note { padding: 20px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.note p { color: var(--txt2); font-size: 14px; }
+.note.err { border-color: rgba(255,122,122,.4); }
+code { background: var(--bg3); padding: 1px 6px; border-radius: 4px; font-size: 12.5px; }
 
-/* KPI */
-.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-.kpi-card { text-align: center; }
-.kpi-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--txt2); margin-bottom: 8px; }
-.kpi-value { font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; }
-.kpi-value.warn { color: var(--warn); }
-.pending-card { border-color: rgba(245,166,35,.4); background: rgba(245,166,35,.05); }
+.hero { border: 1px solid rgba(255,179,64,.4); background: linear-gradient(160deg, rgba(255,179,64,.08), rgba(255,179,64,.02)); border-radius: 18px; padding: 18px; }
+.hero.clear { border-color: var(--bd); background: var(--bg2); }
+.hero-t { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.hero h2 { font-size: 22px; font-weight: 800; letter-spacing: -.02em; color: var(--txt); }
+.hero p { color: var(--txt2); font-size: 14px; margin-top: 2px; }
+.hero .btn { min-height: 48px; gap: 8px; }
+.att { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.att-r { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto 18px; grid-template-areas: 'n a c' 'm a c'; gap: 0 12px; align-items: center; min-height: 58px; padding: 8px 12px; text-align: left; border: 1px solid var(--bd); background: var(--bg2); color: var(--txt); border-radius: 12px; }
+.att-r:hover { border-color: var(--bd2); background: var(--bg3); }
+.att-r:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+.a-n { grid-area: n; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-m { grid-area: m; font-size: 12px; color: var(--txt2); }
+.att-r b { grid-area: a; font-size: 16px; font-variant-numeric: tabular-nums; }
+.att-r :deep(svg) { grid-area: c; color: var(--txt3); }
 
-/* Charts */
-.charts-row { display: grid; grid-template-columns: 1fr 240px 240px; gap: 16px; }
-.chart-card {}
-.chart-title { font-size: 13px; font-weight: 600; margin-bottom: 16px; color: var(--txt2); }
+.kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.kpi { background: var(--bg2); border: 1px solid var(--bd); border-radius: 16px; padding: 16px; }
+.k { font-size: 12px; color: var(--txt2); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+.v { font-size: 30px; font-weight: 800; letter-spacing: -.02em; margin-top: 4px; font-variant-numeric: tabular-nums; color: var(--txt); }
+.s { font-size: 13px; color: var(--txt3); }
+.kpi-n { grid-column: 1 / -1; font-size: 12px; color: var(--txt3); margin-top: -4px; }
 
-/* Bar chart */
-.bar-chart { display: flex; gap: 4px; align-items: flex-end; height: 120px; }
-.bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.bar { width: 100%; background: var(--pr); border-radius: 3px 3px 0 0; min-height: 4px; transition: height 0.3s; }
-.bar-label { font-size: 9px; color: var(--txt3); writing-mode: vertical-rl; transform: rotate(180deg); }
+.card { background: var(--bg2); border: 1px solid var(--bd); border-radius: 16px; padding: 18px; }
+.ct { font-size: 14px; font-weight: 700; margin: 0 0 12px; display: flex; justify-content: space-between; align-items: baseline; }
+.ct span { font-size: 12px; font-weight: 500; color: var(--txt3); }
+.ct2 { margin-top: 18px; }
+.pp { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.ps { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 8px 12px; background: var(--bg3); border: 1px solid var(--bd); border-radius: 12px; color: var(--txt2); font-size: 13px; text-align: left; }
+.ps b { font-size: 22px; color: var(--txt); font-variant-numeric: tabular-nums; }
+.ps.warn b { color: #ffb340; } .ps.ok b { color: #3ddc84; } .ps.info b { color: #6cb4ff; } .ps.err b { color: #ff7a7a; }
+.ps:hover { border-color: var(--bd2); }
+.ps:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
 
-/* Donut */
-.donut-wrap { position: relative; width: 120px; margin: 0 auto 16px; }
-.donut-svg { width: 100%; transform: rotate(-90deg); }
-.donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.donut-legend { display: flex; flex-direction: column; gap: 8px; }
-.legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.charts { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 16px; align-items: start; }
+.bars { display: flex; align-items: flex-end; gap: 6px; height: 190px; padding-top: 18px; }
+.bar { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; position: relative; }
+.bar i { display: block; width: 100%; max-width: 28px; min-height: 3px; border-radius: 6px 6px 2px 2px; background: var(--pr); transition: height .3s ease; }
+.bar i.z { background: var(--bg3); }
+.bn { font-size: 11px; font-weight: 700; color: var(--txt); min-height: 14px; font-variant-numeric: tabular-nums; }
+.bd { font-size: 11px; color: var(--txt2); }
+.bw { font-size: 10px; color: var(--txt3); }
+.donut { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.donut svg { width: 120px; height: 120px; flex-shrink: 0; }
+.dt { fill: var(--txt); font-size: 8px; font-weight: 800; }
+.donut ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 110px; }
+.donut li { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.donut li i { width: 10px; height: 10px; border-radius: 50%; }
+.pn { flex: 1; text-transform: capitalize; }
+.rank { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.rank li { display: grid; grid-template-columns: 16px 86px 1fr 28px; align-items: center; gap: 8px; font-size: 13.5px; }
+.rank li:has(.sz) { grid-template-columns: 38px 1fr 28px; }
+.sw { width: 16px; height: 16px; border-radius: 50%; border: 1px solid rgba(255,255,255,.35); }
+.rn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sz { font-weight: 700; }
+.rb { height: 8px; background: var(--bg3); border-radius: 4px; overflow: hidden; }
+.rb u { display: block; height: 100%; background: var(--pr); border-radius: 4px; }
+.rank b { text-align: right; font-variant-numeric: tabular-nums; }
+.empty { color: var(--txt3); font-size: 13px; }
 
-/* Color rank */
-.color-rank { display: flex; flex-direction: column; gap: 10px; }
-.color-rank-item { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-.rank-num { font-size: 11px; color: var(--txt3); width: 14px; }
-.color-dot { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(255,255,255,.15); flex-shrink: 0; }
-
-/* Orders table preview */
-.orders-preview { display: flex; flex-direction: column; gap: 0; }
-.order-row {
-  display: grid; grid-template-columns: 160px 1fr 100px 80px 140px;
-  gap: 12px; align-items: center; padding: 10px 0;
-  border-bottom: 1px solid var(--bd); font-size: 13px;
+@media (max-width: 1100px) { .charts { grid-template-columns: 1fr 1fr; } .c-bars { grid-column: 1 / -1; } }
+@media (max-width: 960px) {
+  .hero h2 { font-size: 19px; }
+  .hero .btn { width: 100%; }
+  .kpis { grid-template-columns: 1fr 1fr; }
+  .kpi:first-child { grid-column: 1 / -1; }
+  .v { font-size: 26px; }
+  .charts { grid-template-columns: 1fr; }
+  .bars { gap: 3px; height: 160px; }
+  .bw { display: none; }
+  .pp { grid-template-columns: 1fr 1fr; }
 }
-.order-row:last-child { border-bottom: none; }
-.order-id-sm { font-family: monospace; font-size: 12px; color: var(--txt2); }
-.empty-state { text-align: center; padding: 32px 0; }
-
-@media (max-width: 1100px) {
-  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
-  .charts-row { grid-template-columns: 1fr; }
-}
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
 </style>

@@ -12,13 +12,13 @@ const router = createRouter({
     { path: '/admin/login', component: () => import('./views/admin/AdminLoginView.vue') },
     {
       path: '/admin',
-      component: () => import('./views/admin/AdminDashView.vue'),
+      component: () => import('./views/admin/AdminLayout.vue'),
       meta: { requiresAdmin: true },
-    },
-    {
-      path: '/admin/orders',
-      component: () => import('./views/admin/AdminOrdersView.vue'),
-      meta: { requiresAdmin: true },
+      children: [
+        { path: '', component: () => import('./views/admin/AdminDashView.vue') },
+        { path: 'orders', component: () => import('./views/admin/AdminOrdersView.vue') },
+        { path: 'catalog', component: () => import('./views/admin/AdminCatalogView.vue') },
+      ],
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

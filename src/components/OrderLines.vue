@@ -4,9 +4,11 @@ import { useStore } from '../store/index'
 import MiniPolo from './MiniPolo.vue'
 import Icon from './Icon.vue'
 import { POLO_COLORS } from '../data/catalog'
+import { useCatalog } from '../store/catalog'
 import { SIZE_IDS, SIZE_TABLE, MOLD_BY_ID, sizeFactor, type SizeId } from '../data/molds'
 
 const store = useStore()
+const catalog = useCatalog()
 const full = ref(false)
 const guideOpen = ref(false)
 
@@ -73,20 +75,24 @@ function add() {
           <fieldset class="grp">
             <legend>Talla</legend>
             <div class="sizes">
-              <button v-for="s in SIZE_IDS" :key="s" class="size" :class="{ on: l.size === s }" :aria-pressed="l.size === s"
-                      @click="store.updateLine(l.id, { size: s })">{{ s }}</button>
+              <button v-for="s in catalog.sizes" :key="s" class="size" :class="{ on: l.size === s, out: !catalog.isAvailable(l.color, s) }"
+                      :aria-pressed="l.size === s" :disabled="!catalog.isAvailable(l.color, s) && l.size !== s"
+                      :aria-label="catalog.isAvailable(l.color, s) ? s : `${s}, agotada en este color`"
+                      @click="store.updateLine(l.id, { size: s as SizeId })">{{ s }}</button>
             </div>
           </fieldset>
           <fieldset class="grp">
             <legend>Color</legend>
             <div class="sw">
-              <button v-for="c in POLO_COLORS" :key="c.value" class="swatch" :class="{ on: l.color.toLowerCase() === c.value.toLowerCase() }"
-                      :style="{ background: c.value }" :aria-label="c.label" :aria-pressed="l.color.toLowerCase() === c.value.toLowerCase()"
+              <button v-for="c in catalog.colors" :key="c.value" class="swatch" :class="{ on: l.color.toLowerCase() === c.value.toLowerCase(), out: !catalog.isAvailable(c.value, l.size) }"
+                      :style="{ background: c.value }" :disabled="!catalog.isAvailable(c.value, l.size) && l.color.toLowerCase() !== c.value.toLowerCase()"
+                      :aria-label="catalog.isAvailable(c.value, l.size) ? c.label : `${c.label}, agotado en talla ${l.size}`" :aria-pressed="l.color.toLowerCase() === c.value.toLowerCase()"
                       @click="store.updateLine(l.id, { color: c.value })">
                 <Icon v-if="l.color.toLowerCase() === c.value.toLowerCase()" name="check" :size="15" class="ck" />
               </button>
             </div>
           </fieldset>
+          <p v-if="!catalog.isAvailable(l.color, l.size)" class="dup bad" role="alert"><Icon name="alert" :size="15" /> Esta combinación ya no está disponible con el proveedor. Elige otra talla o color.</p>
           <p v-if="dupOf(idx)" class="dup" role="status"><Icon name="info" :size="15" /> Igual que la variante {{ dupOf(idx) }}: se sumarán las cantidades al continuar.</p>
           <p class="note">Pecho {{ SIZE_TABLE[l.size].chest }} cm · largo {{ SIZE_TABLE[l.size].length }} cm<template v-if="printNote(l.size)"> · {{ printNote(l.size) }}</template></p>
         </div>
@@ -132,6 +138,10 @@ function add() {
 .size { min-height: 44px; border: 1px solid var(--bd2); background: transparent; color: var(--txt); border-radius: 10px; font-size: 14px; font-weight: 600; transition: background .15s, border-color .15s; }
 .size:hover { border-color: #666; }
 .size.on { background: var(--pr); border-color: var(--pr); color: #fff; }
+.size.out:not(.on) { opacity: .35; text-decoration: line-through; }
+.swatch.out:not(.on) { opacity: .3; position: relative; }
+.swatch.out:not(.on)::after { content: ''; position: absolute; left: 6px; right: 6px; top: 50%; height: 2px; background: #fff; transform: rotate(-45deg); mix-blend-mode: difference; }
+.dup.bad { color: var(--err); }
 .sw { display: flex; flex-wrap: wrap; gap: 8px; }
 .swatch { width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--bd2); display: inline-flex; align-items: center; justify-content: center; transition: transform .15s, border-color .15s; }
 .swatch.on { border-color: var(--pr); transform: scale(1.1); }

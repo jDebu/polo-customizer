@@ -96,7 +96,11 @@ export const DELIVERY_RATES: DeliveryRate[] = [
 
 export const ALL_DEPARTMENTS = DELIVERY_RATES.flatMap(r => r.departments).sort()
 
-export const POLO_COLORS = [
+import { reactive } from 'vue'
+
+export interface PoloColor { label: string; value: string; active?: boolean }
+
+export const DEFAULT_COLORS: PoloColor[] = [
   { label: 'Blanco',   value: '#ffffff' },
   { label: 'Negro',    value: '#111111' },
   { label: 'Azul marino', value: '#1a2a4a' },
@@ -106,6 +110,13 @@ export const POLO_COLORS = [
   { label: 'Gris',     value: '#888888' },
   { label: 'Granate',  value: '#7a1a2a' },
 ]
+
+/**
+ * Lista viva de colores: la tienda la reemplaza con lo que defina el admin (store/catalog.ts).
+ * Los selectores usan solo los `active !== false`; las búsquedas de nombre usan todos
+ * (así los pedidos antiguos conservan su color aunque se desactive).
+ */
+export const POLO_COLORS: PoloColor[] = reactive(DEFAULT_COLORS.map(c => ({ ...c, active: true })))
 
 export const SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'] as const
 export const PRICE_PER_UNIT = 45
