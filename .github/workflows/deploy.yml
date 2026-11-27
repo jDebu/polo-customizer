@@ -37,6 +37,8 @@ jobs:
           VITE_ADMIN_PIN: ${{ secrets.VITE_ADMIN_PIN }}
           VITE_YAPE_NUMBER: ${{ secrets.VITE_YAPE_NUMBER }}
           VITE_PLIN_NUMBER: ${{ secrets.VITE_PLIN_NUMBER }}
+          VITE_DRIVE_URL: ${{ secrets.VITE_DRIVE_URL }}
+          VITE_DRIVE_TOKEN: ${{ secrets.VITE_DRIVE_TOKEN }}
 
       - uses: actions/upload-pages-artifact@v3
         with:
