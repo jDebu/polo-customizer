@@ -141,11 +141,11 @@ const colorName = computed(() => POLO_COLORS.find(c => c.value === store.design.
                   :style="{ background: c.value }" :aria-label="c.label" :aria-pressed="store.design.poloColor === c.value"
                   @click="store.setPoloColor(c.value)"><Icon v-if="store.design.poloColor === c.value" name="check" :size="16" class="ck" /></button>
         </div>
-        <p class="lab">Manga</p>
+        <!-- <p class="lab">Manga</p>
         <div class="seg">
           <button :class="{ on: store.design.sleeveType === 'short' }" @click="store.setSleeveType('short')">Corta</button>
           <button :class="{ on: store.design.sleeveType === 'long' }" @click="store.setSleeveType('long')">Larga</button>
-        </div>
+        </div> -->
         <p class="lab">Talla para ver el molde <b>· pecho {{ SIZE_TABLE[store.sizeId].chest }} cm</b></p>
         <div class="seg six">
           <button v-for="s in SIZE_IDS" :key="s" :class="{ on: store.sizeId === s }" @click="store.setSize(s)">{{ s }}</button>
